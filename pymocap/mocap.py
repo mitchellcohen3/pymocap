@@ -102,7 +102,7 @@ class MocapTrajectory:
         return MocapTrajectory(stamps, position_data, quaternion_data, frame_id)
 
     @staticmethod
-    def from_bag(filename: str, body_id: str, topic: str = None) -> "MocapTrajectory":
+    def from_bag(bagfile: str, body_id: str, topic: str = None) -> "MocapTrajectory":
         """
         Loads data directly from a ROS bag file, given the body name you wish to 
         extract from. This assumes that a ``vrpn_client_node`` is running and
@@ -129,26 +129,32 @@ class MocapTrajectory:
 
         search_str = f"vrpn_client_node/{body_id}/pose"
 
-        with open(filename, "rb") as f:
-            bag = rosbag.Bag(f)
+        if not isinstance(bagfile, rosbag.Bag):
+            bag = rosbag.Bag(bagfile, "r")
+        else:
+            bag = bagfile
+      
 
-            topics = bag.get_type_and_topic_info()[1].keys()
-            vrpn_topics = [s for s in topics if search_str in s]
+        topics = bag.get_type_and_topic_info()[1].keys()
+        vrpn_topics = [s for s in topics if search_str in s]
 
-            if len(vrpn_topics) > 1:
-                # If more than one matching topic, filter more
-                vrpn_topics = [
-                    s for s in vrpn_topics if f"{body_id}/" + search_str in s
-                ]
+        if len(vrpn_topics) > 1:
+            # If more than one matching topic, filter more
+            vrpn_topics = [
+                s for s in vrpn_topics if f"{body_id}/" + search_str in s
+            ]
 
-            if len(vrpn_topics) > 1:
-                raise ValueError(
-                    "Multiple matching topics found. Please specify"
-                    + " exactly the right one using the `topic` argument."
-                )
+        if len(vrpn_topics) > 1:
+            raise ValueError(
+                "Multiple matching topics found. Please specify"
+                + " exactly the right one using the `topic` argument."
+            )
 
-            data = bag_to_list(bag, vrpn_topics)
+        data = bag_to_list(bag, vrpn_topics)
 
+        if not isinstance(bagfile, rosbag.Bag):
+            bag.close()
+            
         return MocapTrajectory.from_ros(data, body_id)
 
     def position(self, stamps: np.ndarray) -> np.ndarray:

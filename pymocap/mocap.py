@@ -102,9 +102,11 @@ class MocapTrajectory:
         return MocapTrajectory(stamps, position_data, quaternion_data, frame_id)
 
     @staticmethod
-    def from_bag(bagfile: str, body_id: str, topic: str = None) -> "MocapTrajectory":
+    def from_bag(
+        bagfile: str, body_id: str, topic: str = None
+    ) -> "MocapTrajectory":
         """
-        Loads data directly from a ROS bag file, given the body name you wish to 
+        Loads data directly from a ROS bag file, given the body name you wish to
         extract from. This assumes that a ``vrpn_client_node`` is running and
         publishing a topic of the form ``vrpn_client_node/<body_id>/pose``.
 
@@ -133,7 +135,6 @@ class MocapTrajectory:
             bag = rosbag.Bag(bagfile, "r")
         else:
             bag = bagfile
-      
 
         topics = bag.get_type_and_topic_info()[1].keys()
         vrpn_topics = [s for s in topics if search_str in s]
@@ -154,7 +155,7 @@ class MocapTrajectory:
 
         if not isinstance(bagfile, rosbag.Bag):
             bag.close()
-            
+
         return MocapTrajectory.from_ros(data, body_id)
 
     def position(self, stamps: np.ndarray) -> np.ndarray:
@@ -313,7 +314,9 @@ class MocapTrajectory:
             ]
         )
 
-    def to_pynav(self, stamps: np.ndarray, extended_pose: bool = False) -> List[SE23State]:
+    def to_pynav(
+        self, stamps: np.ndarray, extended_pose: bool = False
+    ) -> List[SE23State]:
         """
         Creates pynav ``SE3State`` or ``SE23State`` objects from the trajectory.
 
@@ -345,7 +348,7 @@ class MocapTrajectory:
                 for i in range(len(stamps))
             ]
 
-    def angular_velocity(self, stamps :np.ndarray) -> np.ndarray:
+    def angular_velocity(self, stamps: np.ndarray) -> np.ndarray:
         """
         Get the angular velocity at one or more query times.
 
@@ -377,7 +380,7 @@ class MocapTrajectory:
         omega = (S @ np.expand_dims(q_dot, 2)).squeeze()
         return omega
 
-    def body_velocity(self, stamps :np.ndarray) -> np.ndarray:
+    def body_velocity(self, stamps: np.ndarray) -> np.ndarray:
         """
         Get the body-frame-resolved translational velocity
         at one or more query times.
@@ -398,7 +401,9 @@ class MocapTrajectory:
         C_ba = np.transpose(C_ab, axes=[0, 2, 1])
         return (C_ba @ v_zw_a).squeeze().T
 
-    def get_static_mask(self, window_size: float, std_dev_threshold: float) -> np.ndarray:
+    def get_static_mask(
+        self, window_size: float, std_dev_threshold: float
+    ) -> np.ndarray:
         """
         Detects static moments in the mocap data.
 
@@ -464,7 +469,7 @@ class MocapTrajectory:
         )
         return self.static_mask[nearest_time_idx(stamps).astype(int)]
 
-    def rotate_body_frame(self, C_bm: np.ndarray):
+    def rotate_body_frame(self, C_bm: np.ndarray) -> "MocapTrajectory":
         """
         Rotates the body frame of the mocap data. The mocap attitude data is
         stored in quaternions corresponding to `C_wm`, which is a rotation matrix
@@ -482,12 +487,17 @@ class MocapTrajectory:
         C_bm : ndarray with shape `(3,3)`
             A rotation matrix such that C_wb = C_wm @ C_bm.T
         """
-        C_wm = self.rot_matrix(self.stamps)
+        C_wm = [SO3.from_quat(q) for q in self.raw_quaternion]
         C_wb = C_wm @ C_bm.T
         q_wb = np.array([SO3.to_quat(C).ravel() for C in C_wb])
-        self._fit_quaternion_spline(self.stamps, q_wb)
+        return MocapTrajectory(
+            self.stamps.copy(),
+            self.raw_position.copy(),
+            q_wb,
+            frame_id=self.frame_id,
+        )
 
-    def rotate_world_frame(self, C_wn: np.ndarray):
+    def rotate_world_frame(self, C_wn: np.ndarray) -> "MocapTrajectory":
         """
         Rotates the world frame of the mocap data. The mocap attitude data is
         stored in quaternions corresponding to `C_wm`, which is a rotation matrix
@@ -506,10 +516,11 @@ class MocapTrajectory:
         C_nw : ndarray with shape `(3,3)`
             A rotation matrix such that C_new = C_nm = C_wn.T @ C_wm
         """
-        C_wm = self.rot_matrix(self.stamps)
+        C_wm = [SO3.from_quat(q) for q in self.raw_quaternion]
         C_nm = C_wn.T @ C_wm
         q_nm = np.array([SO3.to_quat(C).ravel() for C in C_nm])
-        r_zw_w = self.position(self.stamps)
+        r_zw_w = self.raw_position
         r_zw_n = (C_wn.T @ r_zw_w.T).T
-        self._fit_position_spline(self.stamps, r_zw_n)
-        self._fit_quaternion_spline(self.stamps, q_nm)
+        return MocapTrajectory(
+            self.stamps.copy(), r_zw_n, q_nm, frame_id=self.frame_id
+        )

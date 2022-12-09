@@ -2,7 +2,7 @@ from pymocap import MocapTrajectory, IMUData
 import rosbag
 
 filename = "data/imu_calib.bag"
-agent = "ifo001"
+agent = "ifo003"
 
 # Extract data
 with rosbag.Bag(filename, "r") as bag:
@@ -12,13 +12,10 @@ with rosbag.Bag(filename, "r") as bag:
 # Do calibration. See function documentation for interpretation of the output.
 C_bm, C_wl, gyro_bias, accel_bias = imu.calibrate(mocap)
 
-# Apply calibration results to the data. This modifies the internal data in place.
-# TODO: should we have it return a new calibrated object instead?
-# i.e. imu_calib = imu.apply_calibration(...)
-#      mocap_calib = mocap.rotate_body_frame(...)
-imu.apply_calibration(gyro_bias = gyro_bias, accel_bias = 0*accel_bias)
-mocap.rotate_body_frame(C_bm)
-mocap.rotate_world_frame(C_wl)
+# Apply calibration results to the data. 
+imu = imu.apply_calibration(gyro_bias = gyro_bias, accel_bias = accel_bias)
+mocap = mocap.rotate_body_frame(C_bm)
+mocap = mocap.rotate_world_frame(C_wl)
 # At this point, the data inside (mocap, imu) is calibrated and ready for use.
 
 ################################################################################

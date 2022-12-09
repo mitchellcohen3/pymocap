@@ -54,28 +54,28 @@ def bag_to_list(
     return out
 
 
-def bmv(matrices, vectors):
+def bmv(matrices, vectors) -> np.ndarray:
     """
     Batch matrix vector multiplication
     """
     return np.matmul(matrices, vectors[:, :, None]).squeeze()
 
 
-def bmm(matrices_a, matrices_b):
+def bmm(matrices_a, matrices_b) -> np.ndarray:
     """
     Batch matrix multiplication
     """
     return np.matmul(matrices_a, matrices_b)
 
 
-def beye(dim: int, num: int):
+def beye(dim: int, num: int) -> np.ndarray:
     """
     Batch identity matrix
     """
     return np.tile(np.eye(dim), (num, 1, 1))
 
 
-def bwedge_so3(phi: np.ndarray):
+def bwedge_so3(phi: np.ndarray) -> np.ndarray:
     """
     Batch wedge for SO(3). phi is provided as a [N x 3] ndarray
     """
@@ -103,9 +103,9 @@ def bvee_so3(Xi: np.ndarray):
         raise ValueError("Xi must have shape (N,3,3)")
 
     phi = np.zeros((Xi.shape[0], 3))
-    phi[:, 0] = Xi[:, 2, 1]
+    phi[:, 0] = -Xi[:, 1, 2]
     phi[:, 1] = Xi[:, 0, 2]
-    phi[:, 2] = Xi[:, 1, 0]
+    phi[:, 2] = -Xi[:, 0, 1]
 
     return phi
 
@@ -186,8 +186,9 @@ def blog_so3(C: np.ndarray):
     if np.any(large_angle_mask):
         large_angles = angle[large_angle_mask].reshape((-1, 1))
         sin_angle = np.sin(large_angles)
-        phi[large_angle_mask, :] = bvee_so3(
-            (0.5 * large_angles / sin_angle).reshape((-1, 1, 1)) * (C[large_angle_mask] - np.transpose(C[large_angle_mask][0, 2, 1]))
+        Xi = (0.5 * large_angles / sin_angle).reshape((-1, 1, 1)) * (
+            C[large_angle_mask] - np.transpose(C[large_angle_mask], [0, 2, 1])
         )
+        phi[large_angle_mask, :] = bvee_so3(Xi)
 
     return phi

@@ -1,12 +1,13 @@
 from typing import Dict, List, Tuple, Any
 import numpy as np
 from sensor_msgs.msg import Imu
-from pynav.lib.imu import IMU
 from scipy.optimize import least_squares
 from scipy import signal
 from .mocap import MocapTrajectory
 from pylie import SO3
 from .utils import bmv, bag_to_list, blog_so3, bexp_so3
+from pynav.lib.states import SE23State
+from pynav.lib.imu import IMU, IMUKinematics
 
 
 class IMUData:
@@ -117,7 +118,7 @@ class IMUData:
         Performs frame and bias calibration on the IMU data. Specifically,
         given mocap data, this function will estimate misalignments between
         1) the IMU frame and the mocap body frame, and 2) the mocap world frame
-        and a "levelled" world frame aligned with gravity. In addition, 
+        and a "levelled" world frame aligned with gravity. In addition,
         gyro and accelerometer biases are estimated.
 
         Parameters
@@ -145,7 +146,7 @@ class IMUData:
         static_gyro = self.angular_velocity[is_static, :]
         gyro_bias = np.mean(static_gyro, axis=0)
 
-        C_bm = self._preint_att_calibration(mocap)
+        C_bm = self._preint_gyro_calibration(mocap)
 
         print(f"{mocap.frame_id} gyro bias                  : {gyro_bias}")
         print(
@@ -154,54 +155,19 @@ class IMUData:
 
         # ########################################################
         # Accelerometer bias and world frame calibration
-        accel_mocap = mocap.acceleration(self.stamps)
-        C_wm = mocap.rot_matrix(self.stamps)
-        C_mw = np.transpose(C_wm, [0, 2, 1])
-        g_l = np.array([0, 0, -9.80665])
+        C_wl, accel_bias = self._preint_accel_calibration(mocap)
 
-        def accel_frame_calib(x: np.ndarray):
-            b = x[:3].ravel()
-
-            if do_gravity:
-                phi_aa = np.array([x[3], x[4], 0])
-                C_wl = SO3.Exp(phi_aa)
-            else:
-                C_wl = np.identity(3)
-
-            C_bw = C_bm @ C_mw
-            accelerometer_mocap = bmv(
-                C_bw, accel_mocap - (C_wl @ g_l.reshape((-1, 1))).ravel()
-            )
-            e = accelerometer_mocap - (self.acceleration - b)
-            return e.ravel()
-
-        print("Calibrating accelerometer frame...")
-        result = least_squares(
-            accel_frame_calib,
-            np.zeros((5,)),
-            method="trf",
-            verbose=2,
-            loss="cauchy",
-        )
-
-        # C_am = SO3.Exp(result.x[:3])
-        accel_bias = result.x[:3]
-        C_wl = SO3.Exp(np.array([result.x[3], result.x[4], 0]))
-        g_a = (C_wl @ g_l.reshape((-1, 1))).ravel()
-        # print(
-        #     f"{mocap.frame_id} accel frame error (degrees)   : {np.degrees(result.x[:3])}"
-        # )
+        grav_angles = np.degrees(SO3.Log(C_wl).ravel()[:2])
+        g_a = C_wl @ np.array([0, 0, -9.80665])
         print(f"{mocap.frame_id} accel bias                    : {accel_bias}")
         print(
-            f"{mocap.frame_id} gravity roll/pitch (degrees)  : {np.degrees(result.x[3:])}"
+            f"{mocap.frame_id} gravity roll/pitch (degrees)  : {grav_angles}"
         )
         print(f"{mocap.frame_id} gravity vector in mocap frame : {g_a}")
-        # ########################################################
-        # ########################################################
 
         return C_bm, C_wl, gyro_bias, accel_bias
 
-    def _preint_att_calibration(self, mocap: MocapTrajectory):
+    def _preint_gyro_calibration(self, mocap: MocapTrajectory):
         window_size = 500  # L
 
         gyro = self.angular_velocity.T
@@ -219,20 +185,20 @@ class IMUData:
             slices = slices[:-1]
 
         # [num_chunks x window_size]
-        stamps_batch = np.array([self.stamps[s] for s in slices])  
+        stamps_batch = np.array([self.stamps[s] for s in slices])
 
         start_stamps = stamps_batch[:, 0]
         stop_stamps = stamps_batch[:, -1]
 
         # Seperate gyro data into chunks of size [num_chunks x 3 x window_size]
-        gyro_chunks = np.array([gyro[:, s] for s in slices]) 
+        gyro_chunks = np.array([gyro[:, s] for s in slices])
 
         # Ground truth DCMs [num_chunks x 3 x 3]
         C_ab_i = mocap.rot_matrix(start_stamps)
         C_ab_j = mocap.rot_matrix(stop_stamps)
 
         def rmi_error(x: np.ndarray):
-            C_mb = SO3.Exp(x[:3]) # Gyro body frame to mocap frame DCM
+            C_mb = SO3.Exp(x[:3])  # Gyro body frame to mocap frame DCM
             calibrated_chunks = C_mb @ gyro_chunks
             DC = compute_attitude_rmi_batch(stamps_batch, calibrated_chunks)
             C_ab_j_est = C_ab_i @ DC
@@ -242,11 +208,84 @@ class IMUData:
 
         print("Calibrating gyro frame...")
         result = least_squares(
-            rmi_error, np.zeros((3,)), verbose=2, max_nfev=50,
+            rmi_error,
+            np.zeros((3,)),
+            verbose=2,
+            max_nfev=50,
+            loss="cauchy"
         )
         phi_mb = result.x
         C_bm = SO3.Exp(phi_mb).T
         return C_bm
+
+    def _preint_accel_calibration(self, mocap: MocapTrajectory):
+        window_size = 500  # L
+        gyro = self.angular_velocity.T
+        accel = self.acceleration.T
+        data_length = gyro.shape[1]
+        is_static = mocap.is_static(self.stamps)
+        static_accel = self.acceleration[is_static, :]
+        C_ab = mocap.rot_matrix(self.stamps[is_static])
+        g_l = np.array([0, 0, -9.80665]).reshape((-1, 1))
+
+        # Initial guess for the bias, assumes the body is roughly level.
+        # TODO. remove this assumption
+        accel_bias = np.mean(g_l.ravel() + bmv(C_ab, static_accel), axis=0)
+
+        # Create a slice object for each chunk
+        slices = [
+            slice(i, i + window_size)
+            for i in range(0, data_length, window_size)
+        ]
+
+        # If last slice is not a full chunk, remove it.
+        if slices[-1].stop > data_length:
+            slices = slices[:-1]
+
+        # [num_chunks x window_size]
+        stamps_batch = np.array([self.stamps[s] for s in slices])
+
+        start_stamps = stamps_batch[:, 0]
+        stop_stamps = stamps_batch[:, -1]
+
+        imu_data = np.vstack([gyro, accel])  # 6 x data_size
+
+        # N x 6 x window_size
+        imu_chunks = np.array([imu_data[:, s] for s in slices])
+        start_stamps = stamps_batch[:, 0]
+        stop_stamps = stamps_batch[:, -1]
+
+        r_i = mocap.position(start_stamps)
+        r_j = mocap.position(stop_stamps)
+        C_ab_i = mocap.rot_matrix(start_stamps)
+        v_i = mocap.velocity(start_stamps)
+        DT = (start_stamps - stop_stamps).reshape((-1, 1))
+
+        def rmi_error(x: np.ndarray):
+            C_wl = SO3.Exp(
+                [x[0], x[1], 0]
+            )  # Levelled frame to mocap world frame
+            accel_bias = x[2:].reshape((-1, 1))
+            gyro_calib = imu_chunks[:, :3, :]
+            accel_calib = imu_chunks[:, 3:, :] - accel_bias
+            DR = compute_rmi_batch(stamps_batch, gyro_calib, accel_calib)[0]
+            r_j_est = (
+                r_i
+                + v_i * DT
+                + 0.5 * (C_wl @ g_l).ravel() * DT**2
+                + bmv(C_ab_i, DR)
+            )
+            e_r = r_j - r_j_est
+            return e_r.ravel()
+
+        print("Calibrating IMU...")
+        x0 = np.zeros((5,))
+        x0[2:] = accel_bias.ravel()
+        result = least_squares(rmi_error, np.zeros((5)), verbose=2, loss="cauchy")
+        x = result.x
+        C_wl = SO3.Exp([x[0], x[1], 0])
+        accel_bias = x[2:]
+        return C_wl, accel_bias
 
 
 def compute_attitude_rmi_batch(stamps: np.ndarray, gyro: np.ndarray):
@@ -273,7 +312,7 @@ def compute_attitude_rmi_batch(stamps: np.ndarray, gyro: np.ndarray):
     t = stamps
     DC = np.tile(np.eye(3), (dim_batch, 1, 1))
     for idx in range(1, N):
-        dt = (t[:, idx] - t[:, idx - 1]).reshape((-1,1))
+        dt = (t[:, idx] - t[:, idx - 1]).reshape((-1, 1))
         w = gyro[:, :, idx - 1]
 
         Om = bexp_so3(w * dt)
@@ -281,3 +320,42 @@ def compute_attitude_rmi_batch(stamps: np.ndarray, gyro: np.ndarray):
         DC = DC @ Om
 
     return DC
+
+
+def compute_rmi_batch(stamps: np.ndarray, gyro: np.ndarray, accel: np.ndarray):
+    """
+    Given a batch of IMU measurement sequences, it will compute the RMIs
+    associated with each sequence in the batch.
+
+    Parameters
+    ----------
+    stamps : np.ndarray with shape (N, len)
+        Timestamps of the IMU measurements.
+    gyro : np.ndarray with shape (N, 3, len)
+        Rate gyro measurements
+    accel : np.ndarray with shape (N, 3, len)
+        accelerometer measurements
+
+    Returns
+    -------
+    Tuple[np.ndarray(N,3), np.ndarray(N,3), np.ndarray(N,3,3)]
+        Position, velocity, attitude RMIs
+    """
+    dim_batch = gyro.shape[0]
+    N = gyro.shape[2]
+    t = stamps
+    DC = np.tile(np.eye(3), (dim_batch, 1, 1))
+    DV = np.zeros((dim_batch, 3))
+    DR = np.zeros((dim_batch, 3))
+    for idx in range(1, N):
+        dt = (t[:, idx] - t[:, idx - 1])[:, None]
+        w = gyro[:, :, idx - 1]
+        a = accel[:, :, idx - 1]
+        DR = DR + DV * dt + 0.5 * bmv(DC, (a * (dt**2)))
+        DV = DV + bmv(DC, (a * dt))
+
+        Om = bexp_so3(w * dt)
+
+        DC = DC @ Om
+
+    return DR, DV, DC

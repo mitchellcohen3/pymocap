@@ -48,7 +48,7 @@ class MocapTrajectory:
         self._fit_quaternion_spline(self.stamps, self.raw_quaternion)
 
         #:np.ndarray: Boolean array containing a static flag for each data point
-        self.static_mask = self.get_static_mask(1, 0.002)
+        self.static_mask = self.get_static_mask(1, 0.0008)
 
     def _fit_position_spline(self, stamps, pos):
         # Fit splines
@@ -135,13 +135,13 @@ class MocapTrajectory:
             topics = bag.get_type_and_topic_info()[1].keys()
             vrpn_topics = [s for s in topics if search_str in s]
 
-            if len(vrpn_topics) > 0:
+            if len(vrpn_topics) > 1:
                 # If more than one matching topic, filter more
                 vrpn_topics = [
                     s for s in vrpn_topics if f"{body_id}/" + search_str in s
                 ]
 
-            if len(vrpn_topics) > 0:
+            if len(vrpn_topics) > 1:
                 raise ValueError(
                     "Multiple matching topics found. Please specify"
                     + " exactly the right one using the `topic` argument."
@@ -432,7 +432,7 @@ class MocapTrajectory:
 
         return is_static
 
-    def is_static(self, t):
+    def is_static(self, stamps: np.ndarray) -> np.ndarray:
         """
         Returns true or false if the body is detected to be static at time t.
         If ``t`` is a list or numpy array, then it will return a boolean array
@@ -456,7 +456,7 @@ class MocapTrajectory:
             bounds_error=False,
             fill_value="extrapolate",
         )
-        return self.static_mask[nearest_time_idx(t).astype(int)]
+        return self.static_mask[nearest_time_idx(stamps).astype(int)]
 
     def rotate_body_frame(self, C_bm: np.ndarray):
         """

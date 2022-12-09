@@ -1,6 +1,7 @@
 import rosbag
 import rospy
 from typing import List, Any
+import numpy as np
 
 def bag_to_list(
     bag: rosbag.Bag, topic: str, start_time: float = 0.0, duration: float = None
@@ -47,3 +48,10 @@ def bag_to_list(
     return [
         msg for _, msg, _ in bag.read_messages(topic, bag_start_time, end_time)
     ]
+
+
+def bmv(matrices, vectors):
+    """
+    Batch matrix vector multiplication
+    """
+    return np.matmul(matrices, vectors[:, :, None]).squeeze()

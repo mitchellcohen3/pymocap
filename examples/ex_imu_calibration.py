@@ -2,7 +2,7 @@ from pymocap import MocapTrajectory, IMUData
 import rosbag
 
 filename = "data/imu_calib.bag"
-agent = "ifo003"
+agent = "ifo002"
 
 # Extract data
 with rosbag.Bag(filename, "r") as bag:

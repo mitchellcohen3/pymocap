@@ -147,11 +147,8 @@ class IMUData:
 
         # ########################################################
         # Gyro bias and body frame calibration
-        is_static = mocap.is_static(self.stamps)
-        static_gyro = self.angular_velocity[is_static, :]
-        gyro_bias = np.mean(static_gyro, axis=0)
 
-        C_bm = _preint_gyro_calibration(self, mocap)
+        C_bm, gyro_bias = _preint_gyro_calibration(self, mocap)
 
         print(f"{mocap.frame_id} gyro bias                  : {gyro_bias}")
         print(
@@ -176,9 +173,14 @@ class IMUData:
         return C_bm, C_wl, gyro_bias, accel_bias
 
 def _preint_gyro_calibration(imu: IMUData, mocap: MocapTrajectory):
+    is_static = mocap.is_static(imu.stamps)
+    static_gyro = imu.angular_velocity[is_static, :]
+    gyro_bias = np.mean(static_gyro, axis=0)
+   
     window_size = 500  # L
 
-    gyro = imu.angular_velocity.T
+    # Get only the dynamic portion of the trajectory
+    gyro = (imu.angular_velocity[~is_static,:] - gyro_bias).T
 
     data_length = gyro.shape[1]
 
@@ -193,7 +195,7 @@ def _preint_gyro_calibration(imu: IMUData, mocap: MocapTrajectory):
         slices = slices[:-1]
 
     # [num_chunks x window_size]
-    stamps_batch = np.array([imu.stamps[s] for s in slices])
+    stamps_batch = np.array([imu.stamps[~is_static][s] for s in slices])
 
     start_stamps = stamps_batch[:, 0]
     stop_stamps = stamps_batch[:, -1]
@@ -223,13 +225,10 @@ def _preint_gyro_calibration(imu: IMUData, mocap: MocapTrajectory):
     )
     phi_mb = result.x
     C_bm = SO3.Exp(phi_mb).T
-    return C_bm
+    return C_bm, gyro_bias
 
 def _preint_accel_calibration(imu:IMUData, mocap: MocapTrajectory):
     window_size = 1000  # L
-    gyro = imu.angular_velocity.T
-    accel = imu.acceleration.T
-    data_length = gyro.shape[1]
     is_static = mocap.is_static(imu.stamps)
     static_accel = imu.acceleration[is_static, :]
     C_ab = mocap.rot_matrix(imu.stamps[is_static])
@@ -239,7 +238,11 @@ def _preint_accel_calibration(imu:IMUData, mocap: MocapTrajectory):
     # TODO. remove this assumption
     accel_bias = np.mean(g_l.ravel() + bmv(C_ab, static_accel), axis=0)
 
-    # Create a slice object for each chunk
+    accel = (imu.acceleration[~is_static] - accel_bias).T
+    gyro = imu.angular_velocity[~is_static].T
+    data_length = accel.shape[1]
+    # Create a slice object for each 
+    # chunk
     slices = [
         slice(i, i + window_size)
         for i in range(0, data_length, window_size)
@@ -250,7 +253,7 @@ def _preint_accel_calibration(imu:IMUData, mocap: MocapTrajectory):
         slices = slices[:-1]
 
     # [num_chunks x window_size]
-    stamps_batch = np.array([imu.stamps[s] for s in slices])
+    stamps_batch = np.array([imu.stamps[~is_static][s] for s in slices])
 
     start_stamps = stamps_batch[:, 0]
     stop_stamps = stamps_batch[:, -1]
@@ -265,7 +268,7 @@ def _preint_accel_calibration(imu:IMUData, mocap: MocapTrajectory):
     r_i = mocap.position(start_stamps)
     r_j = mocap.position(stop_stamps)
     C_ab_i = mocap.rot_matrix(start_stamps)
-    v_i = mocap.velocity(start_stamps)
+    v_i = mocap.velocity(start_stamps) # Still injecting garbage velocity data here. one would hope this would average out. 
     DT = (start_stamps - stop_stamps).reshape((-1, 1))
 
     def rmi_error(x: np.ndarray):

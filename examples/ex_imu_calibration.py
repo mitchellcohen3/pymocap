@@ -13,7 +13,7 @@ with rosbag.Bag(filename, "r") as bag:
 C_bm, C_wl, gyro_bias, accel_bias = imu.calibrate(mocap)
 
 # Apply calibration results to the data. 
-imu = imu.apply_calibration(gyro_bias = gyro_bias, accel_bias = accel_bias)
+imu_calib = imu.apply_calibration(gyro_bias = gyro_bias, accel_bias = accel_bias)
 mocap = mocap.rotate_body_frame(C_bm)
 mocap = mocap.rotate_world_frame(C_wl)
 # At this point, the data inside (mocap, imu) is calibrated and ready for use.
@@ -28,9 +28,10 @@ import numpy as np
 from tqdm import tqdm
 np.set_printoptions(precision=3, suppress=True)
 process = IMUKinematics(None)
-imu_list: List[IMU] = imu.to_pynav()
-traj_true: List[SE23State] = mocap.to_pynav(imu.stamps, extended_pose=True)
+imu_list: List[IMU] = imu_calib.to_pynav()
+traj_true: List[SE23State] = mocap.to_pynav(imu_calib.stamps, extended_pose=True)
 x = traj_true[0]
+x.velocity = 0
 
 traj = [x]
 print("Running dead reckoning...")
@@ -57,6 +58,7 @@ sns.set_theme(style="whitegrid")
 fig, axs = plt.subplots(3, 1, sharex=True, sharey=True)
 axs[0].plot(t,att[:, 0], label="Estimated")
 axs[0].plot(t,att_true[:, 0], label="True")
+axs[0].plot(mocap.stamps, mocap.is_static(mocap.stamps).astype(int), label="Static")
 axs[1].plot(t,att[:, 1])
 axs[1].plot(t,att_true[:, 1])
 axs[2].plot(t,att[:, 2])

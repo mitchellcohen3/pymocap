@@ -1,7 +1,7 @@
 from pymocap import MocapTrajectory, IMUData
 import rosbag
 
-filename = "data/imu_calib_bad_grav.bag"
+filename = "data/imu_calib.bag"
 agent = "ifo002"
 
 # Extract data
@@ -13,10 +13,11 @@ with rosbag.Bag(filename, "r") as bag:
 C_bm, C_wl, gyro_bias, accel_bias = imu.calibrate(mocap)
 
 # Apply calibration results to the data.
-imu_calib = imu.apply_calibration(gyro_bias=gyro_bias, accel_bias=accel_bias)
+imu = imu.apply_calibration(gyro_bias=gyro_bias, accel_bias=accel_bias)
 mocap = mocap.rotate_body_frame(C_bm)
 mocap = mocap.rotate_world_frame(C_wl)
 # At this point, the data inside (mocap, imu) is calibrated and ready for use.
+
 
 ################################################################################
 # We will test with some dead reckoning.
@@ -30,10 +31,10 @@ from pymocap.utils import blog_so3
 np.set_printoptions(precision=3, suppress=True)
 start_idx = 500  # sometimes weird stuff at the beginning
 process = IMUKinematics(None)
-imu_list: List[IMU] = imu_calib.to_pynav()
+imu_list: List[IMU] = imu.to_pynav()
 imu_list = imu_list[start_idx:]
 traj_true: List[SE23State] = mocap.to_pynav(
-    imu_calib.stamps[start_idx:], extended_pose=True
+    imu.stamps[start_idx:], extended_pose=True
 )
 x = traj_true[0]
 x.velocity = 0

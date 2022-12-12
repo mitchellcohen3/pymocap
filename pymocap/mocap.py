@@ -460,7 +460,7 @@ class MocapTrajectory:
         )
         return self.static_mask[nearest_time_idx(stamps).astype(int)]
 
-    def rotate_body_frame(self, C_bm: np.ndarray) -> "MocapTrajectory":
+    def rotate_body_frame(self, C_mb: np.ndarray) -> "MocapTrajectory":
         """
         Rotates the body frame of the mocap data. The mocap attitude data is
         stored in quaternions corresponding to `C_wm`, which is a rotation matrix
@@ -469,17 +469,17 @@ class MocapTrajectory:
 
             v_w = C_wm @ v_m
 
-        The argument, `C_bm` will modify the attitude data such that
+        The argument, `C_mb` will modify the attitude data such that
 
-            C_new = C_wb = C_wm @ C_bm.T
+            C_new = C_wb = C_wm @ C_mb
 
         Parameters
         ----------
-        C_bm : ndarray with shape `(3,3)`
-            A rotation matrix such that C_wb = C_wm @ C_bm.T
+        C_mb : ndarray with shape `(3,3)`
+            A rotation matrix such that C_wb = C_wm @ C_mb
         """
         C_wm = bquat_to_so3(self.raw_quaternion)
-        C_wb = C_wm @ C_bm.T
+        C_wb = C_wm @ C_mb
         q_wb = bso3_to_quat(C_wb)
         return MocapTrajectory(
             self.stamps.copy(),

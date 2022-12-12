@@ -2,7 +2,7 @@ from pymocap import MocapTrajectory, IMUData
 import rosbag
 
 filename = "data/imu_calib.bag"
-agent = "ifo002"
+agent = "ifo003"
 
 # Extract data
 with rosbag.Bag(filename, "r") as bag:
@@ -105,4 +105,39 @@ axs[0].set_ylabel("X (m)")
 axs[1].set_ylabel("Y (m)")
 axs[2].set_ylabel("Z (m)")
 axs[0].set_title("Position")
+
+# %%
+accel_mocap = mocap.accelerometer(imu.stamps)
+accel = imu.acceleration
+fig, axs = plt.subplots(3, 1, sharex=True)
+axs[0].plot(imu.stamps, accel[:, 0], label="IMU")
+axs[0].plot(imu.stamps, accel_mocap[:, 0], label="Mocap")
+axs[1].plot(imu.stamps, accel[:, 1])
+axs[1].plot(imu.stamps, accel_mocap[:, 1])
+axs[2].plot(imu.stamps, accel[:, 2])
+axs[2].plot(imu.stamps, accel_mocap[:, 2])
+axs[0].legend()
+axs[-1].set_xlabel("Time (s)")
+axs[0].set_ylabel("X (m/s^2)")
+axs[1].set_ylabel("Y (m/s^2)")
+axs[2].set_ylabel("Z (m/s^2)")
+axs[0].set_title("Accelerometer")
+
+
+gyro_mocap = mocap.angular_velocity(imu.stamps)
+gyro = imu.angular_velocity
+fig, axs = plt.subplots(3, 1, sharex=True)
+axs[0].plot(imu.stamps, gyro[:, 0], label="IMU")
+axs[0].plot(imu.stamps, gyro_mocap[:, 0], label="Mocap")
+axs[1].plot(imu.stamps, gyro[:, 1])
+axs[1].plot(imu.stamps, gyro_mocap[:, 1])
+axs[2].plot(imu.stamps, gyro[:, 2])
+axs[2].plot(imu.stamps, gyro_mocap[:, 2])
+axs[0].legend()
+axs[-1].set_xlabel("Time (s)")
+axs[0].set_ylabel("X (rad/s)")
+axs[1].set_ylabel("Y (rad/s)")
+axs[2].set_ylabel("Z (rad/s)")
+axs[0].set_title("Gyroscope")
+
 plt.show()

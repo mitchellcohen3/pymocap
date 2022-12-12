@@ -178,26 +178,57 @@ class IMUData:
         np.ndarray
             accel bias
         """
-        # I know this function looks dumb right now but before i was doing 
-        # other things. We can keep this if we want to modify the 
-        # calibration procedure such that we first do gyro only by setting 
-        # some toggles, and then do accel only, and then do both (or something).
-        C_bm, C_wl, b_gyro, b_accel = _preint_calibration(
-            self, mocap, gyro_bias, accel_bias, body_frame, world_frame
+        # Calibrate gyro and body frame first
+        C_mb, _, b_gyro, _ = dead_reckoning_calibration(
+            self,
+            mocap,
+            gyro_bias=gyro_bias,
+            accel_bias=False,
+            body_frame=body_frame,
+            world_frame=False,
+            position_error_weight=None,
+            bias_error_weight=None,
+            attitude_error_weight=1
         )
-        return C_bm, C_wl, b_gyro, b_accel
+
+        # Apply the correction
+        imu_gyro_calib = self.apply_calibration(gyro_bias=b_gyro)
+        mocap_gyro_calib = mocap.rotate_body_frame(C_mb)
+
+        # Then calibrate the accel bias and world frame
+        _, C_wl, _, b_accel = direct_spline_calibration(
+            imu_gyro_calib,
+            mocap_gyro_calib,
+            gyro_bias=False,
+            accel_bias=accel_bias,
+            body_frame=False,
+            world_frame=world_frame,
+        )
+
+        grav_angles = np.degrees(SO3.Log(C_wl).ravel()[:2])
+        g_a = C_wl @ np.array([0, 0, -9.80665])
+        phi_mb = SO3.Log(C_mb).ravel()
+        print(f"{mocap.frame_id} gyro bias                     : {b_gyro}")
+        print(
+            f"{mocap.frame_id} body frame error (degrees)    : {np.degrees(phi_mb)}"
+        )
+        print(f"{mocap.frame_id} accel bias                    : {b_accel}")
+        print(f"{mocap.frame_id} gravity roll/pitch (degrees)  : {grav_angles}")
+        print(f"{mocap.frame_id} gravity vector in mocap frame : {g_a}")
+        return C_mb, C_wl, b_gyro, b_accel
 
 
-
-
-def _preint_calibration(
+def dead_reckoning_calibration(
     imu: IMUData,
     mocap: MocapTrajectory,
     gyro_bias=True,
     accel_bias=True,
     body_frame=True,
     world_frame=True,
-    window_size=1000,
+    window_size=500,
+    attitude_error_weight=1e6,
+    position_error_weight=1,
+    bias_error_weight=1e4,
 ):
     g_l = np.array([0, 0, -9.80665]).reshape((-1, 1))
     is_static = mocap.is_static(imu.stamps)
@@ -263,11 +294,9 @@ def _preint_calibration(
     v_j[stop_is_static, :] = 0
     DT = (stop_stamps - start_stamps).reshape((-1, 1))
 
-
     # no point in optimizing gyro bias. We already know very accurately.
     gyro_bias = False
     imu_chunks[:, :3, :] -= b_gyro.reshape((-1, 1))
-
 
     ##### Compute the error function for the least squares solver
     def rmi_error(x: np.ndarray):
@@ -275,33 +304,33 @@ def _preint_calibration(
             x, gyro_bias, accel_bias, body_frame, world_frame
         )
 
-        gyro_calib = C_mb @ (imu_chunks[:, :3, :] - b_gyro.reshape((-1,1)))
-        accel_calib = C_mb @ (imu_chunks[:, 3:, :] - b_accel.reshape((-1,1)))
-        DR, DV, DC = compute_rmi_batch(chunk_stamps, gyro_calib, accel_calib)
+        gyro_calib = C_mb @ (imu_chunks[:, :3, :] - b_gyro.reshape((-1, 1)))
+        accel_calib = C_mb @ (imu_chunks[:, 3:, :] - b_accel.reshape((-1, 1)))
         g_w = (C_wl @ g_l).ravel()
-        r_j_est = r_i + v_i * DT + 0.5 * g_w * DT**2 + bmv(C_wm_i, DR)
-        C_wm_j_est = C_wm_i @ DC
-        e_r = r_j - r_j_est
-
-        e_C = blog_so3(C_mw_j @ C_wm_j_est)
-        # v_j_est = v_i + g_w * DT + bmv(C_wb_i, DV)
+        DR, DV, DC = compute_rmi_batch(chunk_stamps, gyro_calib, accel_calib)
+        # v_j_est = v_i + g_w * DT + bmv(C_wm_i, DV)
         # e_v = (v_j - v_j_est)
-        # #e_v = e_v[np.logical_and(start_is_static, stop_is_static),:].ravel()
 
-        e_bias = C_mw_static @ g_w + (C_mb @ (static_accel - b_accel.ravel()).T).T
-        # e_bias = e_bias[:4000,:]
-        return np.concatenate(
-            [
-                1e2*e_r.ravel() / e_r.size,
-                1e8*e_C.ravel() / e_C.size,
-                1e6*e_bias.ravel() / e_bias.size
-,
-            ],
-            axis=0,
-        )
+        # Construct the error vector. Omit terms with zero, False, or None weight.
+        e = []
+        if position_error_weight:
+            r_j_est = r_i + v_i * DT + 0.5 * g_w * DT**2 + bmv(C_wm_i, DR)
+            e_r = r_j - r_j_est
+            e.append(position_error_weight * e_r.ravel() / e_r.size)
+        if attitude_error_weight:
+            C_wm_j_est = C_wm_i @ DC
+            e_C = blog_so3(C_mw_j @ C_wm_j_est)
+            e.append(attitude_error_weight * e_C.ravel() / e_C.size)
+        if bias_error_weight:
+            e_bias = (
+                C_mw_static @ g_w
+                + (C_mb @ (static_accel - b_accel.ravel()).T).T
+            )
+            e.append(bias_error_weight * e_bias.ravel() / e_bias.size)
+
+        return np.concatenate(e, axis=0)
 
     ##### Optimization
-
     print("Calibrating IMU...")
     x0 = []
     if gyro_bias:
@@ -309,28 +338,22 @@ def _preint_calibration(
     if accel_bias:
         x0.append(b_accel)
     if body_frame:
-        x0.append(np.array([0,0,0]))
+        x0.append(np.array([0, 0, 0]))
     if world_frame:
-        x0.append(np.array([0,0,0]))
-    x0 = np.concatenate(x0, axis=0)
+        x0.append(np.array([0, 0, 0]))
 
-    result = least_squares(rmi_error, x0, verbose=2, loss="soft_l1")
+    if len(x0) > 0:
+        x0 = np.concatenate(x0, axis=0)
+
+        result = least_squares(rmi_error, x0, verbose=2, jac="3-point")
+        x_opt = result.x
+    else:
+        x_opt = []
+
     _, b_accel, C_mb, C_wl = _unpack_optimization_variables(
-            result.x, gyro_bias, accel_bias, body_frame, world_frame
-        )
-    grav_angles = np.degrees(SO3.Log(C_wl).ravel()[:2])
-    g_a = C_wl @ np.array([0, 0, -9.80665])
-    C_bm = C_mb.T
-    phi_bm = SO3.Log(C_bm).ravel()
-    print(f"{mocap.frame_id} gyro bias                     : {b_gyro}")
-    print(
-        f"{mocap.frame_id} body frame error (degrees)    : {np.degrees(-phi_bm)}"
+        x_opt, gyro_bias, accel_bias, body_frame, world_frame
     )
-    print(f"{mocap.frame_id} accel bias                    : {b_accel}")
-    print(f"{mocap.frame_id} gravity roll/pitch (degrees)  : {grav_angles}")
-    print(f"{mocap.frame_id} gravity vector in mocap frame : {g_a}")
-
-    return C_bm, C_wl, b_gyro, b_accel
+    return C_mb, C_wl, b_gyro, b_accel
 
 
 def _unpack_optimization_variables(
@@ -400,3 +423,84 @@ def compute_rmi_batch(stamps: np.ndarray, gyro: np.ndarray, accel: np.ndarray):
         DC = DC @ Om
 
     return DR, DV, DC
+
+
+def direct_spline_calibration(
+    imu: IMUData,
+    mocap: MocapTrajectory,
+    gyro_bias=True,
+    accel_bias=True,
+    body_frame=True,
+    world_frame=True,
+):
+    g_l = np.array([0, 0, -9.80665]).reshape((-1, 1))
+    is_static = mocap.is_static(imu.stamps)
+
+    ##### Initial guess for the bias using the static moments.
+    static_accel = imu.acceleration[is_static, :]
+    static_gyro = imu.angular_velocity[is_static, :]
+
+    if gyro_bias:
+        b_gyro = np.mean(static_gyro, axis=0)
+    else:
+        b_gyro = np.zeros(3)
+
+    C_wm_static = mocap.rot_matrix(imu.stamps[is_static])
+    C_mw_static = np.transpose(C_wm_static, [0, 2, 1])
+    if accel_bias:
+        b_accel = np.mean(C_mw_static @ g_l.ravel() + static_accel, axis=0)
+    else:
+        b_accel = np.zeros(3)
+
+    # no point in optimizing gyro bias. We already know very accurately.
+    gyro_bias = False
+
+    C_wm = mocap.rot_matrix(imu.stamps)
+    C_mw = np.transpose(C_wm, [0, 2, 1])
+
+    a_m = mocap.acceleration(imu.stamps)
+    a_m[is_static] = 0 # We know these should be exactly 0
+    w_m = mocap.angular_velocity(imu.stamps)
+    w_m[is_static] = 0
+    ##### Compute the error function for the least squares solver
+    def imu_error(x: np.ndarray):
+        b_gyro, b_accel, C_mb, C_wl = _unpack_optimization_variables(
+            x, gyro_bias, accel_bias, body_frame, world_frame
+        )
+
+        g_m = (C_mw @ C_wl @ g_l).squeeze().T
+        w_b = imu.angular_velocity - b_gyro
+        a_b = imu.acceleration - b_accel
+
+        error = np.concatenate(
+            [
+                (C_mb @ w_b.T) - w_m.T,
+                (C_mb @ a_b.T + g_m) - a_m.T,
+            ],
+            axis=0,
+        ).ravel()
+        return error
+
+    ##### Optimization
+    print("Calibrating IMU...")
+    x0 = []
+    if gyro_bias:
+        x0.append(b_gyro)
+    if accel_bias:
+        x0.append(b_accel)
+    if body_frame:
+        x0.append(np.array([0, 0, 0]))
+    if world_frame:
+        x0.append(np.array([0, 0, 0]))
+    x0 = np.concatenate(x0, axis=0)
+
+    result = least_squares(
+        imu_error, x0, verbose=2, jac="2-point", loss="cauchy"
+    )
+
+    _, b_accel, C_mb, C_wl = _unpack_optimization_variables(
+        result.x, gyro_bias, accel_bias, body_frame, world_frame
+    )
+
+
+    return C_mb, C_wl, b_gyro, b_accel

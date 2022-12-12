@@ -65,9 +65,7 @@ class IMUData:
             data.append(u)
         return data
 
-    def filter(
-        self, lowcut_freq: float, highcut_freq: float = None, order: int = 4
-    ):
+    def filter(self, lowcut_freq: float, highcut_freq: float = None, order: int = 4):
         """
         Filters the IMU data using a Butterworth filter.
 
@@ -91,13 +89,9 @@ class IMUData:
             cutoff_freq = [lowcut_freq, highcut_freq]
             fitlertype = "bandstop"
         avg_freq = 1 / ((self.stamps[-1] - self.stamps[0]) / self.stamps.size)
-        sos = signal.butter(
-            order, cutoff_freq, fitlertype, fs=avg_freq, output="sos"
-        )
+        sos = signal.butter(order, cutoff_freq, fitlertype, fs=avg_freq, output="sos")
         self.acceleration = signal.sosfiltfilt(sos, self.acceleration, axis=0)
-        self.angular_velocity = signal.sosfiltfilt(
-            sos, self.angular_velocity, axis=0
-        )
+        self.angular_velocity = signal.sosfiltfilt(sos, self.angular_velocity, axis=0)
 
     def apply_calibration(
         self,
@@ -122,9 +116,7 @@ class IMUData:
             accel_scale = np.array(accel_scale).ravel()
             acceleration = acceleration * accel_scale
 
-        return IMUData(
-            self.stamps.copy(), acceleration.copy(), angular_velocity.copy()
-        )
+        return IMUData(self.stamps.copy(), acceleration.copy(), angular_velocity.copy())
 
     def calibrate(
         self,
@@ -173,9 +165,7 @@ class IMUData:
 
         # ########################################################
         # Accelerometer bias and world frame calibration
-        C_wl, accel_bias = _preint_accel_calibration(
-            imu_gyro_calib, mocap_gyro_calib
-        )
+        C_wl, accel_bias = _preint_accel_calibration(imu_gyro_calib, mocap_gyro_calib)
         return C_bm, C_wl, gyro_bias, accel_bias
 
 
@@ -193,21 +183,23 @@ def _preint_gyro_calibration(
     window_size = 500  # L
 
     # Get only the dynamic portion of the trajectory
-    gyro = (imu.angular_velocity[~is_static, :] - b_gyro).T
+    dynamic_start = np.nonzero(~is_static)[0][0]
+    dynamic_end = np.nonzero(~is_static)[0][-1]
+    dynamic_range = slice(dynamic_start, dynamic_end)
+    gyro = (imu.angular_velocity - b_gyro).T
+    stamps = imu.stamps
 
     data_length = gyro.shape[1]
 
     # Create a slice object for each chunk
-    slices = [
-        slice(i, i + window_size) for i in range(0, data_length, window_size)
-    ]
+    slices = [slice(i, i + window_size) for i in range(0, data_length, window_size)]
 
     # If last slice is not a full chunk, remove it.
     if slices[-1].stop > data_length:
         slices = slices[:-1]
 
     # [num_chunks x window_size]
-    chunk_stamps = np.array([imu.stamps[~is_static][s] for s in slices])
+    chunk_stamps = np.array([stamps[s] for s in slices])
 
     start_stamps = chunk_stamps[:, 0]
     stop_stamps = chunk_stamps[:, -1]
@@ -243,23 +235,21 @@ def _preint_gyro_calibration(
         phi_mb = np.zeros(3)
 
     print(f"{mocap.frame_id} gyro bias                  : {b_gyro}")
-    print(
-        f"{mocap.frame_id} gyro frame error (degrees) : {np.degrees(-phi_mb)}"
-    )
+    print(f"{mocap.frame_id} gyro frame error (degrees) : {np.degrees(-phi_mb)}")
     return C_bm, b_gyro
 
 
 def _preint_accel_calibration(
     imu: IMUData, mocap: MocapTrajectory, accel_bias=True, world_frame=True
 ):
-    window_size = 2000  # L
+    window_size = 1000  # L
     g_l = np.array([0, 0, -9.80665]).reshape((-1, 1))
     is_static = mocap.is_static(imu.stamps)
 
     ##### Initial guess for the bias using the static moments.
     static_accel = imu.acceleration[is_static, :]
     C_wb_static = mocap.rot_matrix(imu.stamps[is_static])
-    C_bw_static = np.transpose(C_wb_static, [0,2,1]) 
+    C_bw_static = np.transpose(C_wb_static, [0, 2, 1])
     if accel_bias:
         b_accel = np.mean(C_bw_static @ g_l.ravel() + static_accel, axis=0)
     else:
@@ -275,9 +265,7 @@ def _preint_accel_calibration(
 
     ##### Divide dynamic portion into chunks (one `slice` per chunk)
     data_length = accel.shape[1]
-    slices = [
-        slice(i, i + window_size) for i in range(0, data_length, window_size)
-    ]
+    slices = [slice(i, i + window_size) for i in range(0, data_length, window_size)]
 
     if slices[-1].stop > data_length:
         # If last slice is not a full chunk, remove it.
@@ -289,9 +277,9 @@ def _preint_accel_calibration(
     stop_stamps = chunk_stamps[:, -1]
 
     # 6 x data_size
-    imu_data = np.vstack([gyro, accel])  
+    imu_data = np.vstack([gyro, accel])
     # N x 6 x window_size
-    imu_chunks = np.array([imu_data[:, s] for s in slices]) 
+    imu_chunks = np.array([imu_data[:, s] for s in slices])
 
     ##### Get ground truth value at beginning and end of each chunk
     start_stamps = chunk_stamps[:, 0]
@@ -304,10 +292,9 @@ def _preint_accel_calibration(
     v_j = mocap.velocity(stop_stamps)
     start_is_static = mocap.is_static(start_stamps)
     stop_is_static = mocap.is_static(stop_stamps)
-    v_i[start_is_static, :] = 0 # Spline is noisy. Zero out static velocities.
+    v_i[start_is_static, :] = 0  # Spline is noisy. Zero out static velocities.
     v_j[stop_is_static, :] = 0
     DT = (stop_stamps - start_stamps).reshape((-1, 1))
-
 
     ##### Compute the error function for the least squares solver
     def rmi_error(x: np.ndarray):
@@ -315,10 +302,10 @@ def _preint_accel_calibration(
             C_wl = SO3.Exp([x[0], x[1], 0])  # Levelled frame to mocap world frame
         else:
             C_wl = np.eye(3)
-        
+
         if accel_bias:
             bias = x[2:].reshape((1, 3, 1))
-        else: 
+        else:
             bias = np.zeros((1, 3, 1))
 
         gyro_calib = imu_chunks[:, :3, :]
@@ -327,22 +314,22 @@ def _preint_accel_calibration(
         g_w = (C_wl @ g_l).ravel()
         r_j_est = r_i + v_i * DT + 0.5 * g_w * DT**2 + bmv(C_wb_i, DR)
         e_r = r_j - r_j_est
-        e_r = e_r/e_r.size
+        e_r = e_r / e_r.size
         # v_j_est = v_i + g_w * DT + bmv(C_wb_i, DV)
         # e_v = (v_j - v_j_est)
         # #e_v = e_v[np.logical_and(start_is_static, stop_is_static),:].ravel()
 
         e_bias = C_bw_static @ g_w + (static_accel - bias.ravel())
-        e_bias = e_bias[:10:,:]
-        e_bias = e_bias/e_bias.size
+        # e_bias = e_bias[:4000,:]
+        e_bias = e_bias / e_bias.size
 
-        return np.concatenate([e_r.ravel(), 10*e_bias.ravel()], axis=0)
+        return np.concatenate([e_r.ravel(), 1e6 * e_bias.ravel()], axis=0)
 
     ##### Optimization
     print("Calibrating accel...")
     x0 = np.zeros((5,))
     x0[2:] = b_accel.ravel()
-    result = least_squares(rmi_error, x0, verbose=2)
+    result = least_squares(rmi_error, x0, verbose=2, loss="soft_l1")
     x = result.x
     C_wl = SO3.Exp([x[0], x[1], 0])
     b_accel = x[2:]

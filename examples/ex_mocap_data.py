@@ -1,6 +1,6 @@
 # %%
 from pymocap import MocapTrajectory
-from typing import List 
+from typing import List
 import matplotlib.pyplot as plt
 import seaborn as sns
 

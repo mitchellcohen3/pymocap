@@ -5,7 +5,7 @@ from csaps import csaps
 from pylie import SO3, SE3, SE23
 from pynav.lib.states import SE3State, SE23State
 from scipy.interpolate import interp1d
-from .utils import bag_to_list
+from .utils import bag_to_list, bquat_to_so3, bso3_to_quat
 import rosbag
 
 
@@ -59,7 +59,7 @@ class MocapTrajectory:
         quat /= np.linalg.norm(quat, axis=1)[:, None]
 
         # Resolve quaternion ambiguities so that quaternion trajectories look
-        # smooth.
+        # smooth. This is recursive so cannot be vectorized.
         for idx, q in enumerate(quat[1:]):
             q_old = quat[idx]
             if np.linalg.norm((-q - q_old)) < np.linalg.norm((q - q_old)):
@@ -102,9 +102,7 @@ class MocapTrajectory:
         return MocapTrajectory(stamps, position_data, quaternion_data, frame_id)
 
     @staticmethod
-    def from_bag(
-        bagfile: str, body_id: str, topic: str = None
-    ) -> "MocapTrajectory":
+    def from_bag(bagfile: str, body_id: str, topic: str = None) -> "MocapTrajectory":
         """
         Loads data directly from a ROS bag file, given the body name you wish to
         extract from. This assumes that a ``vrpn_client_node`` is running and
@@ -141,9 +139,7 @@ class MocapTrajectory:
 
         if len(vrpn_topics) > 1:
             # If more than one matching topic, filter more
-            vrpn_topics = [
-                s for s in vrpn_topics if f"{body_id}/" + search_str in s
-            ]
+            vrpn_topics = [s for s in vrpn_topics if f"{body_id}/" + search_str in s]
 
         if len(vrpn_topics) > 1:
             raise ValueError(
@@ -264,7 +260,7 @@ class MocapTrajectory:
         """
 
         quat = self.quaternion(stamps)
-        return np.array([SO3.from_quat(q, order="wxyz") for q in quat])
+        return bquat_to_so3(quat)
 
     def pose_matrix(self, stamps):
         """
@@ -282,13 +278,11 @@ class MocapTrajectory:
         """
         r = self.position(stamps)
         C = self.rot_matrix(stamps)
-        ## TODO: this can be vectorized
-        return np.array(
-            [
-                SE3.from_components(C[i, :, :], r[i, :])
-                for i in range(r.shape[0])
-            ]
-        )
+        T = np.zeros((C.shape[0], 4, 4))
+        T[:, :3, :3] = C
+        T[:, :3, 3] = r
+        T[:, 3, 3] = 1
+        return T
 
     def extended_pose_matrix(self, stamps):
         """
@@ -307,12 +301,13 @@ class MocapTrajectory:
         r = self.position(stamps)
         C = self.rot_matrix(stamps)
         v = self.velocity(stamps)
-        return np.array(
-            [
-                SE23.from_components(C[i, :, :], v[i, :], r[i, :])
-                for i in range(r.shape[0])
-            ]
-        )
+        T = np.zeros((C.shape[0], 5, 5))
+        T[:, :3, :3] = C
+        T[:, :3, 3] = v
+        T[:, :3, 4] = r
+        T[:, 3, 3] = 1
+        T[:, 4, 4] = 1
+        return T
 
     def to_pynav(
         self, stamps: np.ndarray, extended_pose: bool = False
@@ -373,9 +368,7 @@ class MocapTrajectory:
         S = np.zeros((N, 3, 4))
         for i in range(N):
             e = eps[:, i].reshape((-1, 1))
-            S[i, :, :] = np.hstack(
-                (-2 * e, 2 * (eta[i] * np.eye(3) - SO3.wedge(e)))
-            )
+            S[i, :, :] = np.hstack((-2 * e, 2 * (eta[i] * np.eye(3) - SO3.wedge(e))))
 
         omega = (S @ np.expand_dims(q_dot, 2)).squeeze()
         return omega
@@ -428,9 +421,7 @@ class MocapTrajectory:
 
         for i in range(window_half_width, self.stamps.size - window_half_width):
 
-            pos = self.raw_position[
-                i - window_half_width : i + window_half_width
-            ]
+            pos = self.raw_position[i - window_half_width : i + window_half_width]
             pos_cov = np.cov(pos.T)
 
             if np.trace(pos_cov) < cov_threshold:
@@ -487,9 +478,9 @@ class MocapTrajectory:
         C_bm : ndarray with shape `(3,3)`
             A rotation matrix such that C_wb = C_wm @ C_bm.T
         """
-        C_wm = [SO3.from_quat(q) for q in self.raw_quaternion]
+        C_wm = bquat_to_so3(self.raw_quaternion)
         C_wb = C_wm @ C_bm.T
-        q_wb = np.array([SO3.to_quat(C).ravel() for C in C_wb])
+        q_wb = bso3_to_quat(C_wb)
         return MocapTrajectory(
             self.stamps.copy(),
             self.raw_position.copy(),
@@ -516,11 +507,9 @@ class MocapTrajectory:
         C_nw : ndarray with shape `(3,3)`
             A rotation matrix such that C_new = C_nm = C_wn.T @ C_wm
         """
-        C_wm = [SO3.from_quat(q) for q in self.raw_quaternion]
+        C_wm = bquat_to_so3(self.raw_quaternion)
         C_nm = C_wn.T @ C_wm
-        q_nm = np.array([SO3.to_quat(C).ravel() for C in C_nm])
+        q_nm = bso3_to_quat(C_nm)
         r_zw_w = self.raw_position
         r_zw_n = (C_wn.T @ r_zw_w.T).T
-        return MocapTrajectory(
-            self.stamps.copy(), r_zw_n, q_nm, frame_id=self.frame_id
-        )
+        return MocapTrajectory(self.stamps.copy(), r_zw_n, q_nm, frame_id=self.frame_id)

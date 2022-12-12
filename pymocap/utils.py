@@ -40,13 +40,9 @@ def bag_to_list(
     if duration is None:
         end_time = rospy.Time.from_sec(bag.get_end_time())
     else:
-        end_time = rospy.Time.from_sec(
-            bag.get_start_time() + start_time + duration
-        )
+        end_time = rospy.Time.from_sec(bag.get_start_time() + start_time + duration)
 
-    out = [
-        msg for _, msg, _ in bag.read_messages(topic, bag_start_time, end_time)
-    ]
+    out = [msg for _, msg, _ in bag.read_messages(topic, bag_start_time, end_time)]
 
     if not isinstance(bagfile, rosbag.Bag):
         bag.close()
@@ -192,3 +188,80 @@ def blog_so3(C: np.ndarray):
         phi[large_angle_mask, :] = bvee_so3(Xi)
 
     return phi
+
+
+def bquat_to_so3(quat: np.ndarray, ordering="wxyz"):
+    """
+    Form a rotation matrix from a unit length quaternion.
+    Valid orderings are 'xyzw' and 'wxyz'.
+    """
+
+    if not np.allclose(np.linalg.norm(quat, axis=1), 1.0):
+        raise ValueError("Quaternions must be unit length")
+
+    if ordering == "wxyz":
+        eta = quat[:, 0]
+        eps = quat[:, 1:]
+    elif ordering == "xyzw":
+        eta = quat[:, 3]
+        eps = quat[:, 0:3]
+    else:
+        raise ValueError("order must be 'wxyz' or 'xyzw'. ")
+    eta = eta.reshape((-1, 1, 1))
+    eps = eps.reshape((-1, 3, 1))
+    eps_T = np.transpose(eps, [0, 2, 1])
+    return (
+        (1 - 2 * eps_T @ eps) * beye(3, quat.shape[0])
+        + 2 * eps @ eps_T
+        + 2 * eta * bwedge_so3(eps.squeeze())
+    )
+
+
+def bso3_to_quat(C: np.ndarray, order="wxyz"):
+    """
+    Returns the quaternion corresponding to DCM C.
+
+    Parameters
+    ----------
+    C : ndarray with shape (N,3,3)
+        DCM/rotation matrix to convert.
+    order : str, optional
+        quaternion element order "xyzw" or "wxyz", by default "wxyz"
+
+    Returns
+    -------
+    ndarray with shape (4,1)
+            quaternion representation of C
+
+    Raises
+    ------
+    ValueError
+        if `C` does not have shape (3,3)
+    ValueError
+        if `order` is not "xyzw" or "wxyz"
+    """
+
+    if C.shape[1] != 3 or C.shape[2] != 3:
+        raise ValueError("C must have shape (N,3,3)")
+
+    eta = 0.5 * (btrace(C) + 1) ** 0.5
+    # eps = -np.array(
+    #     [C[1, 2] - C[2, 1], C[2, 0] - C[0, 2], C[0, 1] - C[1, 0]]
+    # ) / (4 * eta)
+    eps = np.zeros((C.shape[0], 3))
+    eps[:, 0] = C[:, 2, 1] - C[:, 1, 2]
+    eps[:, 1] = C[:, 0, 2] - C[:, 2, 0]
+    eps[:, 2] = C[:, 1, 0] - C[:, 0, 1]
+    eps = eps / (4 * eta).reshape((-1, 1))
+
+    q = np.zeros((C.shape[0], 4))
+    if order == "wxyz":
+        q[:, 0] = eta
+        q[:, 1:] = eps
+    elif order == "xyzw":
+        q[:, 0:3] = eps
+        q[:, 3] = eta
+    else:
+        raise ValueError("order must be 'wxyz' or 'xyzw'. ")
+
+    return q

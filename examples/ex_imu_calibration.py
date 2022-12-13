@@ -1,5 +1,7 @@
 from pymocap import MocapTrajectory, IMUData
 import rosbag
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 filename = "data/imu_calib.bag"
 agent = "ifo003"
@@ -16,8 +18,11 @@ C_bm, C_wl, gyro_bias, accel_bias = imu.calibrate(mocap)
 imu = imu.apply_calibration(gyro_bias=gyro_bias, accel_bias=accel_bias)
 mocap = mocap.rotate_body_frame(C_bm)
 mocap = mocap.rotate_world_frame(C_wl)
-# At this point, the data inside (mocap, imu) is calibrated and ready for use.
 
+# At this point, the data inside (mocap, imu) is calibrated and ready for use.
+fig, axs = imu.plot(mocap)
+fig[0].suptitle("Calibrated Gyro Data")
+fig[1].suptitle("Calibrated Accel Data")
 
 ################################################################################
 # We will test with some dead reckoning.
@@ -58,8 +63,6 @@ vel_true = np.array([x.velocity for x in traj_true])
 pos = np.array([x.position for x in traj])
 pos_true = np.array([x.position for x in traj_true])
 
-import matplotlib.pyplot as plt
-import seaborn as sns
 
 sns.set_theme(style="whitegrid")
 fig, axs = plt.subplots(3, 1, sharex=True, sharey=True)
@@ -105,39 +108,5 @@ axs[0].set_ylabel("X (m)")
 axs[1].set_ylabel("Y (m)")
 axs[2].set_ylabel("Z (m)")
 axs[0].set_title("Position")
-
-# %%
-accel_mocap = mocap.accelerometer(imu.stamps)
-accel = imu.acceleration
-fig, axs = plt.subplots(3, 1, sharex=True)
-axs[0].plot(imu.stamps, accel[:, 0], label="IMU")
-axs[0].plot(imu.stamps, accel_mocap[:, 0], label="Mocap")
-axs[1].plot(imu.stamps, accel[:, 1])
-axs[1].plot(imu.stamps, accel_mocap[:, 1])
-axs[2].plot(imu.stamps, accel[:, 2])
-axs[2].plot(imu.stamps, accel_mocap[:, 2])
-axs[0].legend()
-axs[-1].set_xlabel("Time (s)")
-axs[0].set_ylabel("X (m/s^2)")
-axs[1].set_ylabel("Y (m/s^2)")
-axs[2].set_ylabel("Z (m/s^2)")
-axs[0].set_title("Accelerometer")
-
-
-gyro_mocap = mocap.angular_velocity(imu.stamps)
-gyro = imu.angular_velocity
-fig, axs = plt.subplots(3, 1, sharex=True)
-axs[0].plot(imu.stamps, gyro[:, 0], label="IMU")
-axs[0].plot(imu.stamps, gyro_mocap[:, 0], label="Mocap")
-axs[1].plot(imu.stamps, gyro[:, 1])
-axs[1].plot(imu.stamps, gyro_mocap[:, 1])
-axs[2].plot(imu.stamps, gyro[:, 2])
-axs[2].plot(imu.stamps, gyro_mocap[:, 2])
-axs[0].legend()
-axs[-1].set_xlabel("Time (s)")
-axs[0].set_ylabel("X (rad/s)")
-axs[1].set_ylabel("Y (rad/s)")
-axs[2].set_ylabel("Z (rad/s)")
-axs[0].set_title("Gyroscope")
 
 plt.show()

@@ -7,7 +7,7 @@ from pynav.lib.states import SE3State, SE23State
 from scipy.interpolate import interp1d
 from .utils import bag_to_list, bquat_to_so3, bso3_to_quat
 import rosbag
-
+import matplotlib.pyplot as plt
 
 class MocapTrajectory:
     """
@@ -153,6 +153,36 @@ class MocapTrajectory:
             bag.close()
 
         return MocapTrajectory.from_ros(data, body_id)
+
+    def plot(self, axs: plt.Axes = None):
+        if axs is None:
+            fig1, pos_axs = plt.subplots(3, 1, sharex=True)
+            fig2, quat_axs = plt.subplots(4, 1, sharex=True)
+            fig = [fig1, fig2]
+            axs = np.concatenate([pos_axs, quat_axs])
+        else:
+            fig = [axs[0].figure, axs[3].figure]
+            pos_axs = axs[:3]
+            quat_axs = axs[3:]
+
+        # Plot position
+        pos = self.position(self.stamps)
+        pos_axs[0].plot(self.stamps, pos[:, 0])
+        pos_axs[1].plot(self.stamps, pos[:, 1])
+        pos_axs[2].plot(self.stamps, pos[:, 2])
+        pos_axs[2].plot(self.stamps, self.static_mask.astype(int), label="Static")
+        pos_axs[0].set_title("Mocap Position Trajectory")
+        pos_axs[2].legend()
+
+        # Plot quaternion
+        quat = self.quaternion(self.stamps)
+        quat_axs[0].plot(self.stamps, quat[:, 0])
+        quat_axs[1].plot(self.stamps, quat[:, 1])
+        quat_axs[2].plot(self.stamps, quat[:, 2])
+        quat_axs[3].plot(self.stamps, quat[:, 3])
+        quat_axs[0].set_title("Mocap Quaternion Trajectory")
+        quat_axs[0].set_ylim(-1.05, 1.05)
+        return fig, axs
 
     def position(self, stamps: np.ndarray) -> np.ndarray:
         """

@@ -7,10 +7,13 @@ from .mocap import MocapTrajectory
 import matplotlib.pyplot as plt
 from pynav.utils import plot_meas
 from .utils import bag_to_list
+
+
 class HeightData:
     """
     Container for height data from a 1D range sensor.
     """
+
     def __init__(self, stamps: np.ndarray, height: np.ndarray):
         self.stamps = stamps
         self.height = height
@@ -41,7 +44,6 @@ class HeightData:
 
         return HeightData(stamps, height)
 
-
     @staticmethod
     def from_bag(bag, topic: str):
         imu_data = bag_to_list(bag, topic)
@@ -67,7 +69,7 @@ class HeightData:
         Returns
         -------
         List[Measurement]
-            _description_
+            pynav Measurement objects with an Altitude model
         """
         data = []
         model = Altitude(variance, minimum=minimum, bias=bias)
@@ -83,8 +85,15 @@ class HeightData:
             )
         return data
 
-    def plot(self, mocap: MocapTrajectory = None, axs: plt.Axes = None, variance=0.1**2, minimum=0.4, bias=0.0):
-        
+    def plot(
+        self,
+        mocap: MocapTrajectory = None,
+        axs: plt.Axes = None,
+        variance=0.1**2,
+        minimum=0.4,
+        bias=0.0,
+    ):
+
         if mocap is not None:
             height_meas = self.to_pynav(variance=variance, minimum=minimum, bias=bias)
             height_stamps = [meas.stamp for meas in height_meas]
@@ -96,7 +105,7 @@ class HeightData:
                 fig, axs = plt.subplots(1, 1)
             else:
                 fig = axs.get_figure()
-                
+
             axs.plot(self.stamps, self.height)
 
         if isinstance(axs, np.ndarray):

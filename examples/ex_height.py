@@ -3,7 +3,7 @@ from pymocap import MocapTrajectory, HeightData
 from typing import List
 import matplotlib.pyplot as plt
 import seaborn as sns
-import rosbag 
+import rosbag
 
 sns.set_theme(style="whitegrid")
 filename = "data/imu_calib.bag"

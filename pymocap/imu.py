@@ -120,9 +120,7 @@ class IMUData:
 
         return fig, axs
 
-    def filter(
-        self, lowcut_freq: float, highcut_freq: float = None, order: int = 4
-    ):
+    def filter(self, lowcut_freq: float, highcut_freq: float = None, order: int = 4):
         """
         Filters the IMU data using a Butterworth filter.
 
@@ -146,13 +144,9 @@ class IMUData:
             cutoff_freq = [lowcut_freq, highcut_freq]
             fitlertype = "bandstop"
         avg_freq = 1 / ((self.stamps[-1] - self.stamps[0]) / self.stamps.size)
-        sos = signal.butter(
-            order, cutoff_freq, fitlertype, fs=avg_freq, output="sos"
-        )
+        sos = signal.butter(order, cutoff_freq, fitlertype, fs=avg_freq, output="sos")
         self.acceleration = signal.sosfiltfilt(sos, self.acceleration, axis=0)
-        self.angular_velocity = signal.sosfiltfilt(
-            sos, self.angular_velocity, axis=0
-        )
+        self.angular_velocity = signal.sosfiltfilt(sos, self.angular_velocity, axis=0)
 
     def apply_calibration(
         self,
@@ -196,9 +190,7 @@ class IMUData:
             accel_scale = np.array(accel_scale).ravel()
             acceleration = acceleration * accel_scale
 
-        return IMUData(
-            self.stamps.copy(), acceleration.copy(), angular_velocity.copy()
-        )
+        return IMUData(self.stamps.copy(), acceleration.copy(), angular_velocity.copy())
 
     def calibrate(
         self,
@@ -264,9 +256,7 @@ class IMUData:
         g_a = C_wl @ np.array([0, 0, -9.80665])
         phi_mb = SO3.Log(C_mb).ravel()
         print(f"{mocap.frame_id} gyro bias                     : {b_gyro}")
-        print(
-            f"{mocap.frame_id} body frame error (degrees)    : {np.degrees(phi_mb)}"
-        )
+        print(f"{mocap.frame_id} body frame error (degrees)    : {np.degrees(phi_mb)}")
         print(f"{mocap.frame_id} accel bias                    : {b_accel}")
         print(f"{mocap.frame_id} gravity roll/pitch (degrees)  : {grav_angles}")
         print(f"{mocap.frame_id} gravity vector in mocap frame : {g_a}")
@@ -314,9 +304,7 @@ def dead_reckoning_calibration(
 
     ##### Divide dynamic portion into chunks (one `slice` per chunk)
     data_length = accel.shape[1]
-    slices = [
-        slice(i, i + window_size) for i in range(0, data_length, window_size)
-    ]
+    slices = [slice(i, i + window_size) for i in range(0, data_length, window_size)]
 
     if slices[-1].stop > data_length:
         # If last slice is not a full chunk, remove it.
@@ -377,10 +365,7 @@ def dead_reckoning_calibration(
             e_C = blog_so3(C_mw_j @ C_wm_j_est)
             e.append(attitude_error_weight * e_C.ravel() / e_C.size)
         if bias_error_weight:
-            e_bias = (
-                C_mw_static @ g_w
-                + (C_mb @ (static_accel - b_accel.ravel()).T).T
-            )
+            e_bias = C_mw_static @ g_w + (C_mb @ (static_accel - b_accel.ravel()).T).T
             e.append(bias_error_weight * e_bias.ravel() / e_bias.size)
 
         return np.concatenate(e, axis=0)
@@ -411,9 +396,7 @@ def dead_reckoning_calibration(
     return C_mb, C_wl, b_gyro, b_accel
 
 
-def _unpack_optimization_variables(
-    x, gyro_bias, accel_bias, body_frame, world_frame
-):
+def _unpack_optimization_variables(x, gyro_bias, accel_bias, body_frame, world_frame):
     idx = 0
     if gyro_bias:
         b_gyro = x[idx : idx + 3]
@@ -549,9 +532,7 @@ def direct_spline_calibration(
         x0.append(np.array([0, 0, 0]))
     x0 = np.concatenate(x0, axis=0)
 
-    result = least_squares(
-        imu_error, x0, verbose=2, jac="2-point", loss="cauchy"
-    )
+    result = least_squares(imu_error, x0, verbose=2, jac="2-point", loss="cauchy")
 
     _, b_accel, C_mb, C_wl = _unpack_optimization_variables(
         result.x, gyro_bias, accel_bias, body_frame, world_frame

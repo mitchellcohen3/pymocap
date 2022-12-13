@@ -38,9 +38,7 @@ start_idx = 500  # sometimes weird stuff at the beginning
 process = IMUKinematics(None)
 imu_list: List[IMU] = imu.to_pynav()
 imu_list = imu_list[start_idx:]
-traj_true: List[SE23State] = mocap.to_pynav(
-    imu.stamps[start_idx:], extended_pose=True
-)
+traj_true: List[SE23State] = mocap.to_pynav(imu.stamps[start_idx:], extended_pose=True)
 x = traj_true[0]
 x.velocity = 0
 

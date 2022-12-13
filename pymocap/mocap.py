@@ -9,6 +9,7 @@ from .utils import bag_to_list, bquat_to_so3, bso3_to_quat
 import rosbag
 import matplotlib.pyplot as plt
 
+
 class MocapTrajectory:
     """
     This class holds a mocap dataset and provides several convient getters.

@@ -46,8 +46,8 @@ class HeightData:
 
     @staticmethod
     def from_bag(bag, topic: str):
-        imu_data = bag_to_list(bag, topic)
-        return HeightData.from_ros(imu_data)
+        height_msgs = bag_to_list(bag, topic)
+        return HeightData.from_ros(height_msgs)
 
     def to_pynav(
         self, state_id=None, variance=0.1**2, minimum=0.4, bias=0.0
@@ -93,6 +93,20 @@ class HeightData:
         minimum=0.4,
         bias=0.0,
     ):
+        """
+        Plots the height measurements against ground truth.
+
+        Parameters
+        ----------
+        mocap: MocapTrajectory, optional
+            ground truth trajectory, by default None
+        variance : float, optional
+            Variance of the measurement error, by default 0.1**2
+        minimum : float, optional
+            minimum value of the measurement for it to be valid, by default 0.4
+        bias : float, optional
+            sensor bias to be subtracted from the reading, by default 0.0
+        """
 
         if mocap is not None:
             height_meas = self.to_pynav(variance=variance, minimum=minimum, bias=bias)

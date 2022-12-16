@@ -2,6 +2,62 @@ import rosbag
 import rospy
 from typing import List, Any
 import numpy as np
+from scipy.optimize import least_squares
+
+
+class LeastSquares:
+    """
+    A wrapper for scipy.optimize.least_squares that allows for some parameters
+    to be frozen during the optimization.
+    """
+
+    def __init__(
+        self,
+        fun,
+        jac="2-point",
+        bounds=(-np.inf, np.inf),
+        method="trf",
+        loss="linear",
+        verbose=0,
+        **kwargs
+    ):
+        self.fun = fun
+        self.jac = jac
+        self.bounds = bounds
+        self.method = method
+        self.loss = loss
+        self.verbose = verbose
+        self.kwargs = kwargs
+
+        
+    def solve(self, x0, frozen_mask=None):
+
+        self.x0_full = x0
+
+        if frozen_mask is None:
+            self.frozen_mask = np.zeros_like(x0, dtype=bool)
+        else:
+            self.frozen_mask = frozen_mask
+
+        result = least_squares(
+            self.wrapped_fun,
+            self.x0_full[~self.frozen_mask],  # Get only unfrozen values,
+            jac=self.jac,
+            bounds=self.bounds,
+            method=self.method,
+            loss=self.loss,
+            verbose=self.verbose,
+            **self.kwargs
+        )
+        x_out = self.x0_full
+        x_out[~self.frozen_mask] = result.x
+        result.x = x_out
+        return result
+
+    def wrapped_fun(self, x):
+        x_full = self.x0_full.copy()
+        x_full[~self.frozen_mask] = x
+        return self.fun(x_full)
 
 
 def bag_to_list(
@@ -40,9 +96,13 @@ def bag_to_list(
     if duration is None:
         end_time = rospy.Time.from_sec(bag.get_end_time())
     else:
-        end_time = rospy.Time.from_sec(bag.get_start_time() + start_time + duration)
+        end_time = rospy.Time.from_sec(
+            bag.get_start_time() + start_time + duration
+        )
 
-    out = [msg for _, msg, _ in bag.read_messages(topic, bag_start_time, end_time)]
+    out = [
+        msg for _, msg, _ in bag.read_messages(topic, bag_start_time, end_time)
+    ]
 
     if not isinstance(bagfile, rosbag.Bag):
         bag.close()

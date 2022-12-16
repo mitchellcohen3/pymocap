@@ -3,7 +3,7 @@ import numpy as np
 from pynav.lib.models import Magnetometer
 from pynav.types import Measurement
 from pynav.utils import plot_meas
-from .utils import bag_to_list, bmv
+from .utils import bag_to_list, bmv, LeastSquares
 from .mocap import MocapTrajectory
 from matplotlib import pyplot as plt
 from sensor_msgs.msg import MagneticField
@@ -111,24 +111,33 @@ class MagnetometerData:
         axs[2].set_ylabel("Z")
         return fig, axs
 
-    def calibrate(self, mocap: MocapTrajectory = None):
+    def calibrate(
+        self,
+        mocap: MocapTrajectory = None,
+        distortion=True,
+        bias=True,
+        mag_vector=True,
+    ):
         ##### Get the chunk of the trajectory where it is not near the floor.
 
-        static_mask = mocap.position(mocap.stamps)[:, 2] < 0.3
+        static_mask = mocap.position(mocap.stamps)[:, 2] < 0.3 # off the ground
         is_static = mocap.is_static(self.stamps, static_mask=static_mask)
         mag_data = self.magnetic_field[~is_static].T
         stamps = self.stamps[~is_static]
+        # Scale the data for numerical stability
         scaling_factor = np.mean(np.linalg.norm(mag_data, axis=0))
         mag_data = mag_data / scaling_factor
 
-        ############# Initial Guess - Scaling factor and biases
+        ############# Initial Guess - Distortion and biases
         A, b, c = self._ellipsoid_fit(mag_data)
 
         M_inv = np.linalg.inv(A)
         bias_0 = -np.dot(M_inv, b)
-        D_tilde_inv = np.real(1 / np.sqrt(np.dot(b.T, np.dot(M_inv, b)) - c) * sqrtm(A))
+        D_tilde_inv = np.real(
+            1 / np.sqrt(np.dot(b.T, np.dot(M_inv, b)) - c) * sqrtm(A)
+        )
 
-        ############# Initial Guess - Mag-to-body frame rotation guess and dip angle.
+        ############# Initial Guess - Mag-to-body frame rotation and dip angle.
         def mag_frame_error(x):
             d = x[0]
             R = SO3.Exp(x[1:4])
@@ -137,7 +146,9 @@ class MagnetometerData:
             )
             return e.ravel()
 
-        result = least_squares(mag_frame_error, [1, 0, 0, 0], verbose=2, loss="cauchy")
+        result = least_squares(
+            mag_frame_error, [1, 0, 0, 0], verbose=2, loss="cauchy"
+        )
         x = result.x
         d = x[0]
         R = SO3.Exp(x[1:4])
@@ -154,31 +165,58 @@ class MagnetometerData:
             e = m_a - m_a_data
             return e.ravel()
 
-        result = least_squares(world_frame_error, np.zeros(1), verbose=2, loss="cauchy")
+        result = least_squares(
+            world_frame_error, np.zeros(1), verbose=2, loss="cauchy"
+        )
         x = result.x
 
         C_an = SO3.Exp([0, 0, x[0]])
 
         ############### Final calibration
-        m_a_0 = C_an @ m_n
-        D_0 = np.linalg.inv(R.T @ D_tilde_inv)
+        frozen_mask = np.zeros(9+3+2, dtype=bool)
+        x_0 = np.zeros(9+3+2)
+        if distortion:
+            D_0 = np.linalg.inv(R.T @ D_tilde_inv)
+            x_0[:9] = D_0.ravel()
+        else:
+            D_0 = np.identity(3)
+            x_0[:9] = D_0.ravel()
+            frozen_mask[:9] = True
+        if bias:
+            x_0[9:12] = bias_0.ravel()
+        else:
+            frozen_mask[9:12] = True
+
+        if mag_vector is True:
+            m_a_0 = C_an @ m_n
+            x_0[12:14] = [0, 0]
+        elif isinstance(mag_vector, np.ndarray):
+            m_a_0 = mag_vector
+            x_0[12:14] = [0, 0]
+            frozen_mask[12:14] = True
+        else:
+            m_a_0 = C_an @ m_n
+            x_0[12:14] = [0, 0]
+            frozen_mask[12:14] = True
+        
         C_ba = np.transpose(mocap.rot_matrix(stamps), [0, 2, 1])
+
 
         def full_error(x):
             D = x[0:9].reshape((3, 3))
-            bias = x[9:12].reshape((-1, 1))
+            b = x[9:12].reshape((-1, 1))
             phi = x[12:14]
             m_a = SO3.Exp([0, phi[0], phi[1]]) @ m_a_0
-            y_hat = D @ (C_ba @ m_a).T + bias
+            y_hat = D @ (C_ba @ m_a).T + b
             e = mag_data - y_hat
             return e.ravel()
 
-        x_0 = np.hstack([D_0.ravel(), bias_0.ravel(), [0, 0]])
-        results = least_squares(full_error, x_0, loss="arctan")
+        optim = LeastSquares(full_error, loss="cauchy", verbose=2)
+        results = optim.solve(x_0, frozen_mask)
         x = results.x
 
         D = x[0:9].reshape((3, 3))
-        bias = x[9:12].reshape((-1, 1))
+        b = x[9:12].reshape((-1, 1))
         phi = x[12:14]
         m_a = SO3.Exp([0, phi[0], phi[1]]) @ m_a_0
 
@@ -186,13 +224,16 @@ class MagnetometerData:
         print(D)
         print(f"                             * {scaling_factor}")
         ("Estimated bias vector:")
-        print(bias)
+        print(b)
         print(f"                             * {scaling_factor}")
         ("Estimated magnetic vector in mocap world frame:")
         print(m_a)
 
         # D_inv = np.linalg.inv(D)
-        return D * scaling_factor, bias * scaling_factor, m_a
+        return D * scaling_factor, b * scaling_factor, m_a
+
+
+
 
     def apply_calibration(self, distortion, bias):
         D_inv = np.linalg.inv(distortion)

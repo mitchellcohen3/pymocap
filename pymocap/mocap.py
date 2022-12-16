@@ -465,7 +465,7 @@ class MocapTrajectory:
 
         return is_static
 
-    def is_static(self, stamps: np.ndarray) -> np.ndarray:
+    def is_static(self, stamps: np.ndarray, static_mask=None) -> np.ndarray:
         """
         Returns true or false if the body is detected to be static at time t.
         If ``t`` is a list or numpy array, then it will return a boolean array
@@ -475,12 +475,20 @@ class MocapTrajectory:
         ----------
         t : float or List[float] or numpy.ndarray
             Query stamps
-
+        static_mask : np.ndarray with shape (N,1), optional
+            To use a custom static mask to refer to for the static state. This
+            must be a boolean array with as many elements as there are stamps
+            in this object. If None, then the static mask is computed automatically
+            with default parameters. By default None.
         Returns
         -------
         bool or numpy.ndarray
             True if the body is static at time t, False otherwise.
         """
+
+        if static_mask is None:
+            static_mask = self.static_mask
+
         indexes = np.array(range(len(self.stamps)))
         nearest_time_idx = interp1d(
             self.stamps,
@@ -489,7 +497,7 @@ class MocapTrajectory:
             bounds_error=False,
             fill_value="extrapolate",
         )
-        return self.static_mask[nearest_time_idx(stamps).astype(int)]
+        return static_mask[nearest_time_idx(stamps).astype(int)]
 
     def rotate_body_frame(self, C_mb: np.ndarray) -> "MocapTrajectory":
         """

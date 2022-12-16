@@ -8,6 +8,7 @@ from pylie import SO3
 from .utils import bmv, bag_to_list, blog_so3, bexp_so3
 from pynav.lib.states import SE23State
 from pynav.lib.imu import IMU, IMUKinematics
+from matplotlib import pyplot as plt
 
 
 class IMUData:
@@ -65,9 +66,61 @@ class IMUData:
             data.append(u)
         return data
 
-    def filter(
-        self, lowcut_freq: float, highcut_freq: float = None, order: int = 4
-    ):
+    def plot(
+        self, mocap: MocapTrajectory = None, axs: List[plt.Axes] = None
+    ) -> Tuple[List[plt.Figure], List[plt.Axes]]:
+
+        # Plot gyro
+        if axs is None:
+            fig1, gyro_axs = plt.subplots(3, 1, sharex=True)
+            fig2, accel_axs = plt.subplots(3, 1, sharex=True)
+            fig = [fig1, fig2]
+            axs = np.concatenate([gyro_axs, accel_axs])
+        else:
+            fig = [axs[0].figure, axs[3].figure]
+            gyro_axs = axs[:3]
+            accel_axs = axs[3:]
+
+        gyro_mocap = mocap.angular_velocity(self.stamps)
+        gyro = self.angular_velocity
+        gyro_axs[0].plot(self.stamps, gyro[:, 0], label="IMU")
+        gyro_axs[1].plot(self.stamps, gyro[:, 1])
+        gyro_axs[2].plot(self.stamps, gyro[:, 2])
+
+        if mocap is not None:
+            gyro_axs[0].plot(self.stamps, gyro_mocap[:, 0], label="Mocap")
+            gyro_axs[1].plot(self.stamps, gyro_mocap[:, 1])
+            gyro_axs[2].plot(self.stamps, gyro_mocap[:, 2])
+
+        gyro_axs[0].legend()
+        gyro_axs[-1].set_xlabel("Time (s)")
+        gyro_axs[0].set_ylabel("X (rad/s)")
+        gyro_axs[1].set_ylabel("Y (rad/s)")
+        gyro_axs[2].set_ylabel("Z (rad/s)")
+        gyro_axs[0].set_title("Rate gyro")
+
+        # Plot accelerometer
+        accel_mocap = mocap.accelerometer(self.stamps)
+        accel = self.acceleration
+        accel_axs[0].plot(self.stamps, accel[:, 0], label="IMU")
+        accel_axs[1].plot(self.stamps, accel[:, 1])
+        accel_axs[2].plot(self.stamps, accel[:, 2])
+
+        if mocap is not None:
+            accel_axs[0].plot(self.stamps, accel_mocap[:, 0], label="Mocap")
+            accel_axs[1].plot(self.stamps, accel_mocap[:, 1])
+            accel_axs[2].plot(self.stamps, accel_mocap[:, 2])
+
+        accel_axs[0].legend()
+        accel_axs[-1].set_xlabel("Time (s)")
+        accel_axs[0].set_ylabel("X (m/s^2)")
+        accel_axs[1].set_ylabel("Y (m/s^2)")
+        accel_axs[2].set_ylabel("Z (m/s^2)")
+        accel_axs[0].set_title("Accelerometer")
+
+        return fig, axs
+
+    def filter(self, lowcut_freq: float, highcut_freq: float = None, order: int = 4):
         """
         Filters the IMU data using a Butterworth filter.
 
@@ -91,13 +144,9 @@ class IMUData:
             cutoff_freq = [lowcut_freq, highcut_freq]
             fitlertype = "bandstop"
         avg_freq = 1 / ((self.stamps[-1] - self.stamps[0]) / self.stamps.size)
-        sos = signal.butter(
-            order, cutoff_freq, fitlertype, fs=avg_freq, output="sos"
-        )
+        sos = signal.butter(order, cutoff_freq, fitlertype, fs=avg_freq, output="sos")
         self.acceleration = signal.sosfiltfilt(sos, self.acceleration, axis=0)
-        self.angular_velocity = signal.sosfiltfilt(
-            sos, self.angular_velocity, axis=0
-        )
+        self.angular_velocity = signal.sosfiltfilt(sos, self.angular_velocity, axis=0)
 
     def apply_calibration(
         self,
@@ -141,9 +190,7 @@ class IMUData:
             accel_scale = np.array(accel_scale).ravel()
             acceleration = acceleration * accel_scale
 
-        return IMUData(
-            self.stamps.copy(), acceleration.copy(), angular_velocity.copy()
-        )
+        return IMUData(self.stamps.copy(), acceleration.copy(), angular_velocity.copy())
 
     def calibrate(
         self,
@@ -188,7 +235,7 @@ class IMUData:
             world_frame=False,
             position_error_weight=None,
             bias_error_weight=None,
-            attitude_error_weight=1
+            attitude_error_weight=1,
         )
 
         # Apply the correction
@@ -209,9 +256,7 @@ class IMUData:
         g_a = C_wl @ np.array([0, 0, -9.80665])
         phi_mb = SO3.Log(C_mb).ravel()
         print(f"{mocap.frame_id} gyro bias                     : {b_gyro}")
-        print(
-            f"{mocap.frame_id} body frame error (degrees)    : {np.degrees(phi_mb)}"
-        )
+        print(f"{mocap.frame_id} body frame error (degrees)    : {np.degrees(phi_mb)}")
         print(f"{mocap.frame_id} accel bias                    : {b_accel}")
         print(f"{mocap.frame_id} gravity roll/pitch (degrees)  : {grav_angles}")
         print(f"{mocap.frame_id} gravity vector in mocap frame : {g_a}")
@@ -259,9 +304,7 @@ def dead_reckoning_calibration(
 
     ##### Divide dynamic portion into chunks (one `slice` per chunk)
     data_length = accel.shape[1]
-    slices = [
-        slice(i, i + window_size) for i in range(0, data_length, window_size)
-    ]
+    slices = [slice(i, i + window_size) for i in range(0, data_length, window_size)]
 
     if slices[-1].stop > data_length:
         # If last slice is not a full chunk, remove it.
@@ -322,10 +365,7 @@ def dead_reckoning_calibration(
             e_C = blog_so3(C_mw_j @ C_wm_j_est)
             e.append(attitude_error_weight * e_C.ravel() / e_C.size)
         if bias_error_weight:
-            e_bias = (
-                C_mw_static @ g_w
-                + (C_mb @ (static_accel - b_accel.ravel()).T).T
-            )
+            e_bias = C_mw_static @ g_w + (C_mb @ (static_accel - b_accel.ravel()).T).T
             e.append(bias_error_weight * e_bias.ravel() / e_bias.size)
 
         return np.concatenate(e, axis=0)
@@ -356,9 +396,7 @@ def dead_reckoning_calibration(
     return C_mb, C_wl, b_gyro, b_accel
 
 
-def _unpack_optimization_variables(
-    x, gyro_bias, accel_bias, body_frame, world_frame
-):
+def _unpack_optimization_variables(x, gyro_bias, accel_bias, body_frame, world_frame):
     idx = 0
     if gyro_bias:
         b_gyro = x[idx : idx + 3]
@@ -459,7 +497,7 @@ def direct_spline_calibration(
     C_mw = np.transpose(C_wm, [0, 2, 1])
 
     a_m = mocap.acceleration(imu.stamps)
-    a_m[is_static] = 0 # We know these should be exactly 0
+    a_m[is_static] = 0  # We know these should be exactly 0
     w_m = mocap.angular_velocity(imu.stamps)
     w_m[is_static] = 0
     ##### Compute the error function for the least squares solver
@@ -494,13 +532,10 @@ def direct_spline_calibration(
         x0.append(np.array([0, 0, 0]))
     x0 = np.concatenate(x0, axis=0)
 
-    result = least_squares(
-        imu_error, x0, verbose=2, jac="2-point", loss="cauchy"
-    )
+    result = least_squares(imu_error, x0, verbose=2, jac="2-point", loss="cauchy")
 
     _, b_accel, C_mb, C_wl = _unpack_optimization_variables(
         result.x, gyro_bias, accel_bias, body_frame, world_frame
     )
-
 
     return C_mb, C_wl, b_gyro, b_accel

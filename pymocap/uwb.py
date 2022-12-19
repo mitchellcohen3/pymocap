@@ -1,14 +1,10 @@
-from typing import Dict, List, Tuple, Any
-import rosbag
+from typing import List, Any, Tuple
 import numpy as np
 from uwb_ros.msg import RangeStamped
-from pynav.types import Measurement, MeasurementModel
-import rospy
+from pynav.types import Measurement
 import pickle
-from copy import deepcopy
 from dataclasses import dataclass
 import matplotlib.pyplot as plt
-import itertools
 from pynav.lib.models import RangePoseToPose
 from .utils import bag_to_list, bmv
 from .mocap import MocapTrajectory
@@ -33,6 +29,9 @@ class Tag:
 
 
 class RangeData:
+    """
+    Class for storing UWB range data.
+    """
     def __init__(
         self,
         stamps,
@@ -73,6 +72,20 @@ class RangeData:
 
     @staticmethod
     def from_ros(range_data: List[RangeStamped]):
+        """
+        Create a RangeData object from a list of ROS ``RangeStamped`` messages.
+
+        Parameters
+        ----------
+        range_data : List[RangeStamped]
+            List of ROS ``RangeStamped`` messages from `uwb_ros` package.
+
+        Returns
+        -------
+        RangeData
+            RangeData object.
+        """
+
 
         stamps = []
         range_ = []
@@ -133,7 +146,22 @@ class RangeData:
         return out
 
     @staticmethod
-    def from_bag(bag, topic: str):
+    def from_bag(bag, topic: str) -> "RangeData":
+        """
+        Create a RangeData object from a ROS bag.
+
+        Parameters
+        ----------
+        bag : rosbag.Bag or str
+            rosbag.Bag object or path to bag file.
+        topic : str
+            topic containing range data. Must be of type `uwb_ros/RangeStamped`.
+
+        Returns
+        -------
+        RangeData
+            RangeData object.
+        """
         height_msgs = bag_to_list(bag, topic)
         return RangeData.from_ros(height_msgs)
 
@@ -158,32 +186,68 @@ class RangeData:
             self.std2[slc],
         )
 
-    def by_pair(self, from_id, to_id):
+    def by_pair(self, from_id :int, to_id:int) -> "RangeData":
+        """
+        Get a RangeData object containing only the measurements between the
+        specified pair of tags.
+
+        Parameters
+        ----------
+        from_id : int
+            The ID of the intiating tag.
+        to_id : int
+            The ID of the receiving tag.
+
+        Returns
+        -------
+        RangeData
+            RangeData object
+        """
         match_mask = np.logical_and(
             self.from_id == from_id, self.to_id == to_id
         )
         return self[match_mask]
 
-    def to_pynav(self, tags: List[Tag], variance=None, state_id: Any = None):
+    def to_pynav(self, tags: List[Tag], variance: float = None, state_id: Any = None) -> List[Measurement]:
+        """
+        Convert to a list of `pynav` measurements.
+
+        Parameters
+        ----------
+        tags : List[Tag]
+            Information about the tags
+        variance : float, optional
+            If specified, overrides the variance for all measurements. Otherwise
+            the variance from the bag file or the calibration is used.
+        state_id : Any, optional
+            optional identifier to add to the measurement, by default None
+
+        Returns
+        -------
+        List[Measurement]
+            List of `pynav` measurements.
+        """
+
         tag_dict = {t.id: t for t in tags}
         measurements = []
-
-        model_dict = {}
 
         for i, stamp in enumerate(self.stamps):
             from_tag = tag_dict[self.from_id[i]]
             to_tag = tag_dict[self.to_id[i]]
 
-            if (from_tag.id, to_tag.id) not in model_dict:
-                model_dict[(from_tag.id, to_tag.id)] = RangePoseToPose(
-                    from_tag.position,
-                    to_tag.position,
-                    from_tag.parent_id,
-                    to_tag.parent_id,
-                    self.covariance[i],
-                )
+            if variance is not None:
+                v = variance
+            else:
+                v = self.covariance[i]
 
-            model = model_dict[(from_tag.id, to_tag.id)]
+            model = RangePoseToPose(
+                from_tag.position,
+                to_tag.position,
+                from_tag.parent_id,
+                to_tag.parent_id,
+                v,
+            )
+
 
             measurements.append(
                 Measurement(self.range[i], stamp, model, state_id=state_id)
@@ -193,7 +257,29 @@ class RangeData:
 
     def plot(
         self, mocaps: List[MocapTrajectory] = None, tags: List[Tag] = None
-    ):
+    ) -> Tuple[plt.Figure, List[plt.Axes]]:
+        """
+        Plot the range data.
+
+        Parameters
+        ----------
+        mocaps : List[MocapTrajectory], optional
+            Mocap trajectories for all the bodies involved in the data.
+            If not provided, no ground truth will be plotted.
+        tags : List[Tag], optional
+            Tag info for all the tags. If not provided, no ground truth 
+            will be plotted.
+
+        Returns
+        -------
+        Tuple[plt.Figure, List[plt.Axes]]
+            Figure and axes objects.
+
+        Raises
+        ------
+        ValueError
+            If there are more than 20 pairs of tags in the data.
+        """
 
         pairs = set(zip(self.from_id, self.to_id))
 
@@ -207,9 +293,6 @@ class RangeData:
         fig, axes = plt.subplots(num_rows, num_cols, sharex=True)
         axes = axes.ravel()
 
-        if mocaps is not None:
-            pose_dict = {m.frame_id: m.pose_matrix(self.stamps) for m in mocaps}
-
         if tags is not None:
             tag_dict = {t.id: t for t in tags}
 
@@ -220,6 +303,7 @@ class RangeData:
             ax.set_title(f"{pair[0]} to {pair[1]}")
 
             if mocaps is not None and tags is not None:
+                pose_dict = {m.frame_id: m.pose_matrix(data.stamps) for m in mocaps}
                 tag1 = tag_dict[pair[0]]
                 tag2 = tag_dict[pair[1]]
                 pose1 = pose_dict[tag1.parent_id]
@@ -232,10 +316,10 @@ class RangeData:
                     tag1.position,
                     tag2.position,
                 )
-                ax.plot(self.stamps, range_, color="r")
-                three_sigma = 3 * np.sqrt(self.covariance)
+                ax.plot(data.stamps, range_, color="r")
+                three_sigma = 3 * np.sqrt(data.covariance)
                 ax.fill_between(
-                    self.stamps,
+                    data.stamps,
                     range_ - three_sigma,
                     range_ + three_sigma,
                     alpha=0.3,
@@ -259,8 +343,27 @@ class RangeData:
         return fig, axes
 
     def remove_outliers(
-        self, mocaps: List[MocapTrajectory], tags: List[Tag], max_error
-    ):
+        self, mocaps: List[MocapTrajectory], tags: List[Tag], max_error: float
+    ) -> "RangeData":
+        """
+        Remove outliers from the range data.
+
+        Parameters
+        ----------
+        mocaps : List[MocapTrajectory]
+            Mocap trajectories for all the bodies involved in the data.
+        tags : List[Tag]
+            Tag info for all the tags.
+        max_error : float
+            Maximum error in meters. If the range error is larger than this, the
+            measurement is removed.
+
+        Returns
+        -------
+        RangeData
+            New range data object with outliers removed.
+        """
+    
 
         pose_dict = {m.frame_id: m.pose_matrix(self.stamps) for m in mocaps}
         tag_dict = {t.id: t for t in tags}
@@ -296,6 +399,20 @@ class RangeData:
 
 
     def apply_calibration(self, tags: List[Tag]) -> "RangeData":
+        """
+        Apply power-correlated bias correction to the range data.
+
+        Parameters
+        ----------
+        tags : List[Tag]
+            Tag info for all the tags. Critically, these dataclasses must contain
+            a valid ``antenna_delay`` attribute.
+
+        Returns
+        -------
+        RangeData
+            New range data object with bias correction applied.
+        """
 
         # Retrieve pre-determined calibration results
         with open("pymocap/calib_results.pickle", "rb") as pickle_file:
@@ -485,35 +602,3 @@ def _compute_range_dstwr(Ra1, Ra2, Db1, Db2, bias):
         Bias-corrected range measurement.
     """
     return (0.5 * SPEED_OF_LIGHT / 1e9) * (Ra1 - (Ra2 / Db2) * Db1) - bias
-
-    # def to_pynav(
-    #     self, pair_models: Dict[Tuple, MeasurementModel], state_id: Any
-    # ) -> List[Measurement]:
-    #     """
-
-    #     Parameters
-    #     ----------
-    #     pair_models : Dict[Tuple, MeasurementModel]
-    #         Dictionary of measurement model to associate with each range pair.
-    #     state_id : Any
-    #         State ID to assign to each ``Measurement``.
-
-    #     Returns
-    #     -------
-    #     List[Measurement]
-    #         The measurements in the form of a list of ``Measurement`` objects.
-    #     """
-    #     data = []
-    #     for pair in self.pairs:
-    #         t, r = self.by_pair(*pair)
-    #         model = pair_models[pair]
-    #         for i in range(len(t)):
-    #             data.append(
-    #                 Measurement(
-    #                     r[i],
-    #                     t[i],
-    #                     model,
-    #                     state_id=state_id,
-    #                 )
-    #             )
-    #     return data

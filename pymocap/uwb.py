@@ -10,8 +10,12 @@ from dataclasses import dataclass
 import matplotlib.pyplot as plt
 import itertools
 from pynav.lib.models import RangePoseToPose
-from .utils import bag_to_list
+from .utils import bag_to_list, bmv
 from .mocap import MocapTrajectory
+
+
+SPEED_OF_LIGHT = 299702547  # speed of light in m/s
+DWT_TO_NS = 1e9 * (1.0 / 499.2e6 / 128.0)  # DW time unit to nanoseconds
 
 
 @dataclass
@@ -19,20 +23,23 @@ class Tag:
     id: int
     parent_id: Any
     position: np.ndarray
+    antenna_delay: float
 
-    def __init__(self, id, parent_id, position):
+    def __init__(self, id, parent_id, position, antenna_delay):
         self.id = id
         self.parent_id = parent_id
         self.position = np.array(position).ravel()
+        self.antenna_delay = antenna_delay
 
 
 class RangeData:
     def __init__(
         self,
         stamps,
-        range,
+        range_,
         from_id,
         to_id,
+        covariance,
         tx1,
         rx1,
         tx2,
@@ -47,9 +54,10 @@ class RangeData:
         std2,
     ):
         self.stamps = np.array(stamps).ravel()
-        self.range = np.array(range).ravel()
+        self.range = np.array(range_).ravel()
         self.from_id = np.array(from_id).ravel()
         self.to_id = np.array(to_id).ravel()
+        self.covariance = np.array(covariance).ravel()
         self.tx1 = np.array(tx1).ravel()
         self.rx1 = np.array(rx1).ravel()
         self.tx2 = np.array(tx2).ravel()
@@ -67,9 +75,10 @@ class RangeData:
     def from_ros(range_data: List[RangeStamped]):
 
         stamps = []
-        range = []
+        range_ = []
         from_id = []
         to_id = []
+        covariance = []
         tx1 = []
         rx1 = []
         tx2 = []
@@ -85,9 +94,10 @@ class RangeData:
 
         for r in range_data:
             stamps.append(r.header.stamp.to_sec())
-            range.append(r.range)
+            range_.append(r.range)
             from_id.append(r.from_id)
             to_id.append(r.to_id)
+            covariance.append(r.covariance)
             tx1.append(r.tx1)
             rx1.append(r.rx1)
             tx2.append(r.tx2)
@@ -103,9 +113,10 @@ class RangeData:
 
         out = RangeData(
             stamps,
-            range,
+            range_,
             from_id,
             to_id,
+            covariance,
             tx1,
             rx1,
             tx2,
@@ -126,32 +137,34 @@ class RangeData:
         height_msgs = bag_to_list(bag, topic)
         return RangeData.from_ros(height_msgs)
 
+    def __getitem__(self, slc):
+        return RangeData(
+            self.stamps[slc],
+            self.range[slc],
+            self.from_id[slc],
+            self.to_id[slc],
+            self.covariance[slc],
+            self.tx1[slc],
+            self.rx1[slc],
+            self.tx2[slc],
+            self.rx2[slc],
+            self.tx3[slc],
+            self.rx3[slc],
+            self.fpp1[slc],
+            self.fpp2[slc],
+            self.rxp1[slc],
+            self.rxp2[slc],
+            self.std1[slc],
+            self.std2[slc],
+        )
+
     def by_pair(self, from_id, to_id):
         match_mask = np.logical_and(
             self.from_id == from_id, self.to_id == to_id
         )
-        return RangeData(
-            self.stamps[match_mask],
-            self.range[match_mask],
-            self.from_id[match_mask],
-            self.to_id[match_mask],
-            self.tx1[match_mask],
-            self.rx1[match_mask],
-            self.tx2[match_mask],
-            self.rx2[match_mask],
-            self.tx3[match_mask],
-            self.rx3[match_mask],
-            self.fpp1[match_mask],
-            self.fpp2[match_mask],
-            self.rxp1[match_mask],
-            self.rxp2[match_mask],
-            self.std1[match_mask],
-            self.std2[match_mask],
-        )
+        return self[match_mask]
 
-    def to_pynav(
-        self, tags: List[Tag], variance=0.1**2, state_id: Any = None
-    ):
+    def to_pynav(self, tags: List[Tag], variance=None, state_id: Any = None):
         tag_dict = {t.id: t for t in tags}
         measurements = []
 
@@ -167,7 +180,7 @@ class RangeData:
                     to_tag.position,
                     from_tag.parent_id,
                     to_tag.parent_id,
-                    variance,  # TODO. use modelled variance instead.
+                    self.covariance[i],
                 )
 
             model = model_dict[(from_tag.id, to_tag.id)]
@@ -211,7 +224,7 @@ class RangeData:
                 tag2 = tag_dict[pair[1]]
                 pose1 = pose_dict[tag1.parent_id]
                 pose2 = pose_dict[tag2.parent_id]
-                range = _get_range(
+                range_ = _get_range_from_poses(
                     pose1[:, :3, 3],
                     pose1[:, :3, :3],
                     pose2[:, :3, 3],
@@ -219,7 +232,15 @@ class RangeData:
                     tag1.position,
                     tag2.position,
                 )
-                ax.plot(self.stamps, range, color="r")
+                ax.plot(self.stamps, range_, color="r")
+                three_sigma = 3 * np.sqrt(self.covariance)
+                ax.fill_between(
+                    self.stamps,
+                    range_ - three_sigma,
+                    range_ + three_sigma,
+                    alpha=0.3,
+                    color="r",
+                )
 
         fig.suptitle("Range Data")
         fig.add_subplot(111, frameon=False)
@@ -237,107 +258,65 @@ class RangeData:
 
         return fig, axes
 
-    def to_pynav(
-        self, pair_models: Dict[Tuple, MeasurementModel], state_id: Any
-    ) -> List[Measurement]:
-        """
+    def remove_outliers(
+        self, mocaps: List[MocapTrajectory], tags: List[Tag], max_error
+    ):
 
-        Parameters
-        ----------
-        pair_models : Dict[Tuple, MeasurementModel]
-            Dictionary of measurement model to associate with each range pair.
-        state_id : Any
-            State ID to assign to each ``Measurement``.
+        pose_dict = {m.frame_id: m.pose_matrix(self.stamps) for m in mocaps}
+        tag_dict = {t.id: t for t in tags}
+        pose1 = np.array(
+            [
+                pose_dict[tag_dict[t].parent_id][i]
+                for i, t in enumerate(self.from_id)
+            ]
+        )
 
-        Returns
-        -------
-        List[Measurement]
-            The measurements in the form of a list of ``Measurement`` objects.
-        """
-        data = []
-        for pair in self.pairs:
-            t, r = self.by_pair(*pair)
-            model = pair_models[pair]
-            for i in range(len(t)):
-                data.append(
-                    Measurement(
-                        r[i],
-                        t[i],
-                        model,
-                        state_id=state_id,
-                    )
-                )
-        return data
+        pose2 = np.array(
+            [
+                pose_dict[tag_dict[t].parent_id][i]
+                for i, t in enumerate(self.to_id)
+            ]
+        )
 
+        tag_position1 = np.array([tag_dict[t].position for t in self.from_id])
+        tag_position2 = np.array([tag_dict[t].position for t in self.to_id])
 
-def _get_range(pos1, att1, pos2, att2, tag_pos1, tag_pos2):
-    r_1w_a = pos1
-    C_a1 = att1
-    r_2w_a = pos2
-    C_a2 = att2
-    r_t1_1 = tag_pos1
-    r_t2_2 = tag_pos2
-    r_t1t2_a: np.ndarray = (C_a1 @ r_t1_1 + r_1w_a) - (C_a2 @ r_t2_2 + r_2w_a)
-    return np.linalg.norm(r_t1t2_a, axis=1)
+        range_ = _get_range_from_poses(
+            pose1[:, :3, 3],
+            pose1[:, :3, :3],
+            pose2[:, :3, 3],
+            pose2[:, :3, :3],
+            tag_position1,
+            tag_position2,
+        )
+
+        is_outlier_mask = np.abs(range_ - self.range) > max_error
+        is_outlier_mask = np.logical_or(is_outlier_mask, self.range < 0)
+        return self[~is_outlier_mask]
 
 
-class RangeCorrector:
-    """
+    def apply_calibration(self, tags: List[Tag]) -> "RangeData":
 
-    Object to retrieve and correct range measurements.
-    """
-
-    _c = 299702547  # speed of light
-    _dwt_to_ns = 1e9 * (1.0 / 499.2e6 / 128.0)  # DW time unit to nanoseconds
-
-    def __init__(self):
-        """
-        Constructor
-        """
         # Retrieve pre-determined calibration results
-        with open("multinav/calib_results.pickle", "rb") as pickle_file:
+        with open("pymocap/calib_results.pickle", "rb") as pickle_file:
             calib_results = pickle.load(pickle_file)
 
-        self.delays = calib_results["delays"]
-        self.bias_spl = calib_results["bias_spl"]
-        self.std_spl = calib_results["std_spl"]
+        delays = {t.id: t.antenna_delay for t in tags}
 
-    def get_corrected_range(self, uwb_msg: RangeStamped) -> RangeStamped:
-        """
-        Extracts and corrects the range measurement and
-        associated information.
+        bias_spline = calib_results["bias_spl"]
+        std_dev_spline = calib_results["std_spl"]
 
-        PARAMETERS:
-        -----------
-        uwb_msg: RangeStamped
-            One instance of UWB data.
-
-        RETURNS:
-        --------
-         dict: Dictionary with 4 fields.
-            from_id: int
-                ID of initiating tag.
-            to_id: int
-                ID of target tag.
-            range: float
-                Corrected range measurement.
-            std: float
-                Standard deviation of corrected range measurement.
-        """
-        # Get tag IDs
-        from_id = uwb_msg.from_id
-        to_id = uwb_msg.to_id
         # Get timestamps
-        tx1 = uwb_msg.tx1 * self._dwt_to_ns
-        rx1 = uwb_msg.rx1 * self._dwt_to_ns
-        tx2 = uwb_msg.tx2 * self._dwt_to_ns
-        rx2 = uwb_msg.rx2 * self._dwt_to_ns
-        tx3 = uwb_msg.tx3 * self._dwt_to_ns
-        rx3 = uwb_msg.rx3 * self._dwt_to_ns
+        tx1 = self.tx1 * DWT_TO_NS
+        rx1 = self.rx1 * DWT_TO_NS
+        tx2 = self.tx2 * DWT_TO_NS
+        rx2 = self.rx2 * DWT_TO_NS
+        tx3 = self.tx3 * DWT_TO_NS
+        rx3 = self.rx3 * DWT_TO_NS
 
         # Correct clock wrapping
-        rx2, rx3 = self._unwrap_ts(tx1, rx2, rx3)
-        tx2, tx3 = self._unwrap_ts(rx1, tx2, tx3)
+        rx2, rx3 = _unwrap_ts(tx1, rx2, rx3)
+        tx2, tx3 = _unwrap_ts(rx1, tx2, tx3)
 
         # Compute time intervals
         Ra1 = rx2 - tx1
@@ -346,117 +325,195 @@ class RangeCorrector:
         Db2 = tx3 - tx2
 
         # Get antenna delays
-        delay_0 = self.delays[from_id]
-        delay_1 = self.delays[to_id]
+        # TODO. should be a better way to vectorize this.
+        delay_0 = np.array([delays[i] for i in self.from_id])
+        delay_1 = np.array([delays[i] for i in self.to_id])
 
         # Correct time intervals for antenna delays
         Ra1 += delay_0
         Db1 -= delay_1
 
         # Get power
-        fpp1 = uwb_msg.fpp1
-        fpp2 = uwb_msg.fpp2
+        fpp1 = self.fpp1
+        fpp2 = self.fpp2
 
         # Implement lifting function
-        fpp1_lift = self.lift(fpp1)
-        fpp2_lift = self.lift(fpp2)
+        fpp1_lift = _lift(fpp1)
+        fpp2_lift = _lift(fpp2)
 
         # Get average lifted power
         fpp_lift_avg = 0.5 * (fpp1_lift + fpp2_lift)
 
         # Power-induced bias
-        bias = self.bias_spl(fpp_lift_avg)
+        bias = bias_spline(fpp_lift_avg)
 
         # Compute range measurement
-        range = self._compute_range(Ra1, Ra2, Db1, Db2, bias)
+        range_ = _compute_range_dstwr(Ra1, Ra2, Db1, Db2, bias)
 
         # Get standard deviation of measurement
-        std = float(self.std_spl(fpp_lift_avg))
+        std = std_dev_spline(fpp_lift_avg)
 
-        msg_new = deepcopy(uwb_msg)
-        msg_new.range = range
-        msg_new.covariance = std**2
-        return msg_new
+        # Create new RangeData object
+        new_range_data = RangeData(
+            self.stamps,
+            range_,
+            self.from_id,
+            self.to_id,
+            std**2,
+            self.tx1,
+            self.rx1,
+            self.tx2,
+            self.rx2,
+            self.tx3,
+            self.rx3,
+            self.fpp1,
+            self.fpp2,
+            self.rxp1,
+            self.rxp2,
+            self.std1,
+            self.std2,
+        )
+        return new_range_data
 
-    def _unwrap_ts(self, ts1, ts2, ts3):
-        """
-        Corrects the UWB-module's clock unwrapping.
 
-        PARAMETERS:
-        -----------
-        ts1: int
-            First timestamp in a sequence of timestamps registered
-            on the same clock.
-        ts2: int
-            Second timestamp in a sequence of timestamps registered
-            on the same clock.
-        ts3: int
-            Third timestamp in a sequence of timestamps registered
-            on the same clock.
+def _get_range_from_poses(pos1, att1, pos2, att2, tag_pos1, tag_pos2):
+    r_1w_a = pos1
+    C_a1 = att1
+    r_2w_a = pos2
+    C_a2 = att2
+    r_t1_1 = tag_pos1
+    if r_t1_1.size == 3:
+        r_t1_1 = r_t1_1.ravel()
+        r_t1_1 = np.tile(r_t1_1, [C_a1.shape[0],1])
 
-        RETURNS:
-        --------
-        ts2: int
-            Unwrapped second timestamp in a sequence of timestamps
-            registered on the same clock.
-        ts3: int
-            Unwrapped third timestamp in a sequence of timestamps
-            registered on the same clock.
-        """
-        # The timestamps are registered as type uint32.
-        max_time_ns = 2**32 * self._dwt_to_ns
+        
+    r_t2_2 = tag_pos2
+    if r_t2_2.size == 3:
+        r_t2_2 = r_t2_2.ravel()
+        r_t2_2 = np.tile(r_t2_2, [C_a2.shape[0],1])
 
-        if ts2 < ts1:
-            ts2 += max_time_ns
-            ts3 += max_time_ns
-        if ts3 < ts2:
-            ts3 += max_time_ns
 
-        return ts2, ts3
 
-    @staticmethod
-    def lift(x, alpha=-82):
-        """
-        Lifting function for better visualization and calibration.
-        Based on Cano, J., Pages, G., Chaumette, E., & Le Ny, J. (2022). Clock
-                 and Power-Induced Bias Correction for UWB Time-of-Flight Measurements.
-                 IEEE Robotics and Automation Letters, 7(2), 2431-2438.
-                 https://doi.org/10.1109/LRA.2022.3143202
 
-        PARAMETERS:
-        -----------
-        x: np.array(n,1)
-            Input to lifting function. Received Power in dBm in this context.
-        alpha: scalar
-            Centering parameter. Default: -82 dBm.
 
-        RETURNS:
-        --------
-        np.array(n,1)
-            Array of lifted received power.
-        """
-        return 10 ** ((x - alpha) / 10)
+    r_t1t2_a: np.ndarray = (bmv(C_a1,r_t1_1) + r_1w_a) - (bmv(C_a2, r_t2_2) + r_2w_a)
+    return np.linalg.norm(r_t1t2_a, axis=1)
 
-    def _compute_range(self, Ra1, Ra2, Db1, Db2, bias):
-        """
-        Compute the bias-corrected range measurement.
 
-        PARAMETERS:
-        -----------
-        Ra1: int
-            rx2 - rx1.
-        Ra2: int
-            rx3 - rx2.
-        Db1: int
-            tx2 - rx1.
-        Db2: int
-            tx3 - tx2.
-        bias: float
-            Estimated power-induced bias.
+def _unwrap_ts(ts1, ts2, ts3):
+    """
+    Corrects the UWB-module's clock unwrapping.
 
-        RETURNS:
-        --------
-        float
-            Bias-corrected range measurement.
-        """
-        return 0.5 * self._c / 1e9 * (Ra1 - (Ra2 / Db2) * Db1) - bias
+    PARAMETERS:
+    -----------
+    ts1: int
+        First timestamp in a sequence of timestamps registered
+        on the same clock.
+    ts2: int
+        Second timestamp in a sequence of timestamps registered
+        on the same clock.
+    ts3: int
+        Third timestamp in a sequence of timestamps registered
+        on the same clock.
+
+    RETURNS:
+    --------
+    ts2: int
+        Unwrapped second timestamp in a sequence of timestamps
+        registered on the same clock.
+    ts3: int
+        Unwrapped third timestamp in a sequence of timestamps
+        registered on the same clock.
+    """
+    # The timestamps are registered as type uint32.
+    max_time_ns = 2**32 * DWT_TO_NS
+
+    ts2_is_wrapped = ts2 < ts1
+    ts2[ts2_is_wrapped] += max_time_ns
+    ts3[ts2_is_wrapped] += max_time_ns
+
+    ts3_is_wrapped = ts3 < ts2
+    ts3[ts3_is_wrapped] += max_time_ns
+
+    return ts2, ts3
+
+
+def _lift(x, alpha=-82):
+    """
+    Lifting function for better visualization and calibration.
+    Based on Cano, J., Pages, G., Chaumette, E., & Le Ny, J. (2022). Clock
+                and Power-Induced Bias Correction for UWB Time-of-Flight Measurements.
+                IEEE Robotics and Automation Letters, 7(2), 2431-2438.
+                https://doi.org/10.1109/LRA.2022.3143202
+
+    PARAMETERS:
+    -----------
+    x: np.array(n,1)
+        Input to lifting function. Received Power in dBm in this context.
+    alpha: scalar
+        Centering parameter. Default: -82 dBm.
+
+    RETURNS:
+    --------
+    np.array(n,1)
+        Array of lifted received power.
+    """
+    return 10 ** ((x - alpha) / 10)
+
+
+def _compute_range_dstwr(Ra1, Ra2, Db1, Db2, bias):
+    """
+    Compute the bias-corrected range measurement using double-sided TWR
+    and a bias correction.
+
+    PARAMETERS:
+    -----------
+    Ra1: int
+        rx2 - rx1.
+    Ra2: int
+        rx3 - rx2.
+    Db1: int
+        tx2 - rx1.
+    Db2: int
+        tx3 - tx2.
+    bias: float
+        Estimated power-induced bias.
+
+    RETURNS:
+    --------
+    float
+        Bias-corrected range measurement.
+    """
+    return (0.5 * SPEED_OF_LIGHT / 1e9) * (Ra1 - (Ra2 / Db2) * Db1) - bias
+
+    # def to_pynav(
+    #     self, pair_models: Dict[Tuple, MeasurementModel], state_id: Any
+    # ) -> List[Measurement]:
+    #     """
+
+    #     Parameters
+    #     ----------
+    #     pair_models : Dict[Tuple, MeasurementModel]
+    #         Dictionary of measurement model to associate with each range pair.
+    #     state_id : Any
+    #         State ID to assign to each ``Measurement``.
+
+    #     Returns
+    #     -------
+    #     List[Measurement]
+    #         The measurements in the form of a list of ``Measurement`` objects.
+    #     """
+    #     data = []
+    #     for pair in self.pairs:
+    #         t, r = self.by_pair(*pair)
+    #         model = pair_models[pair]
+    #         for i in range(len(t)):
+    #             data.append(
+    #                 Measurement(
+    #                     r[i],
+    #                     t[i],
+    #                     model,
+    #                     state_id=state_id,
+    #                 )
+    #             )
+    #     return data

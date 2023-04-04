@@ -1,6 +1,5 @@
 from typing import List, Any, Tuple
 import numpy as np
-from uwb_ros.msg import RangeStamped
 from pynav.types import Measurement
 import pickle
 from dataclasses import dataclass
@@ -8,6 +7,11 @@ import matplotlib.pyplot as plt
 from pynav.lib.models import RangePoseToPose
 from .utils import bag_to_list, bmv
 from .mocap import MocapTrajectory
+
+try: 
+    from uwb_ros.msg import RangeStamped
+except ImportError:
+    pass
 
 
 SPEED_OF_LIGHT = 299702547  # speed of light in m/s
@@ -71,7 +75,7 @@ class RangeData:
         self.std2 = np.array(std2).ravel()
 
     @staticmethod
-    def from_ros(range_data: List[RangeStamped]):
+    def from_ros(range_data):
         """
         Create a RangeData object from a list of ROS ``RangeStamped`` messages.
 

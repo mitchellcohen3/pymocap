@@ -3,16 +3,15 @@ from pymocap import MocapTrajectory, MagnetometerData
 from typing import List
 import matplotlib.pyplot as plt
 import seaborn as sns
-import rosbag
-
+from rosbags.highlevel import AnyReader
+from pathlib import Path
 sns.set_theme(style="whitegrid")
 filename = "data/imu_calib.bag"
 agent = "ifo002"
 
 # Extract data
-with rosbag.Bag(filename) as bag:
-    mocap = MocapTrajectory.from_bag(bag, agent)
-    mag = MagnetometerData.from_bag(bag, f"/{agent}/mavros/imu/mag")
+mocap = MocapTrajectory.from_bag(filename, agent)
+mag = MagnetometerData.from_bag(filename, f"/{agent}/mavros/imu/mag")
 
 D, b, m_a = mag.calibrate(mocap)
 mag_calib = mag.apply_calibration(D, b)

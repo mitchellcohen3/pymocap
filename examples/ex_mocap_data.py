@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 sns.set_theme(style="whitegrid")
-filename = "data/imu_calib.bag"
+filename = "examples/imu_calib.bag"
 agent = "ifo001"
 
 # Extract data

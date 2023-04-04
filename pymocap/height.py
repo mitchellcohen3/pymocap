@@ -1,6 +1,6 @@
 from typing import Dict, List, Tuple, Any
 import numpy as np
-from sensor_msgs.msg import Range
+# from sensor_msgs.msg import Range
 from pynav.lib.models import Altitude
 from pynav.types import Measurement
 from .mocap import MocapTrajectory
@@ -19,7 +19,7 @@ class HeightData:
         self.height = height
 
     @staticmethod
-    def from_ros(height_data: List[Range]) -> "HeightData":
+    def from_ros(height_data) -> "HeightData":
         """
         Get height data from ROS messages.
 

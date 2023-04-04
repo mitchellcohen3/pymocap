@@ -1,14 +1,15 @@
 from typing import List, Any
 import numpy as np
-from geometry_msgs.msg import PoseStamped
+#from geometry_msgs.msg import PoseStamped
 from csaps import csaps
 from pylie import SO3, SE3, SE23
 from pynav.lib.states import SE3State, SE23State
 from scipy.interpolate import interp1d
 from .utils import bag_to_list, bquat_to_so3, bso3_to_quat
-import rosbag
+#import rosbag
 import matplotlib.pyplot as plt
-
+from pathlib import Path
+from rosbags.highlevel import AnyReader
 
 class MocapTrajectory:
     """
@@ -69,7 +70,7 @@ class MocapTrajectory:
         self._quat_spline = csaps(stamps, quat.T, smooth=0.99999)
 
     @staticmethod
-    def from_ros(pose_data: List[PoseStamped], frame_id: Any = None):
+    def from_ros(pose_data, frame_id: Any = None):
         """
         Parameters
         ----------
@@ -85,7 +86,7 @@ class MocapTrajectory:
         position_data = []
         quaternion_data = []
         for p in pose_data:
-            stamps.append(p.header.stamp.to_sec())
+            stamps.append(p.header.stamp.sec + 1e-9*p.header.stamp.nanosec)
             position_data.append(
                 [p.pose.position.x, p.pose.position.y, p.pose.position.z]
             )
@@ -130,12 +131,9 @@ class MocapTrajectory:
 
         search_str = f"vrpn_client_node/{body_id}/pose"
 
-        if not isinstance(bagfile, rosbag.Bag):
-            bag = rosbag.Bag(bagfile, "r")
-        else:
-            bag = bagfile
+        with AnyReader([Path(bagfile)]) as reader:
+            topics = reader.topics.keys()
 
-        topics = bag.get_type_and_topic_info()[1].keys()
         vrpn_topics = [s for s in topics if search_str in s]
 
         if len(vrpn_topics) > 1:
@@ -148,10 +146,7 @@ class MocapTrajectory:
                 + " exactly the right one using the `topic` argument."
             )
 
-        data = bag_to_list(bag, vrpn_topics)
-
-        if not isinstance(bagfile, rosbag.Bag):
-            bag.close()
+        data = bag_to_list(bagfile, vrpn_topics)
 
         return MocapTrajectory.from_ros(data, body_id)
 

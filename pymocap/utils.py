@@ -1,9 +1,10 @@
-import rosbag
-import rospy
+# import rosbag
+# import rospy
 from typing import List, Any
 import numpy as np
 from scipy.optimize import least_squares
-
+from pathlib import Path
+from rosbags.highlevel import AnyReader
 
 class LeastSquares:
     """
@@ -61,7 +62,7 @@ class LeastSquares:
 
 
 def bag_to_list(
-    bagfile: rosbag.Bag,
+    bagfile: str,
     topic: str,
     start_time: float = 0.0,
     duration: float = None,
@@ -71,8 +72,8 @@ def bag_to_list(
 
     Parameters
     ----------
-    bag : rosbag.Bag or str
-        Bag file as either a rosbag.Bag object or a path to a bag file.
+    bag : str
+        path to a bag file.
     topic : str
         Topic to extract messages from.
     start_time : float, optional
@@ -86,26 +87,17 @@ def bag_to_list(
     List[Any]
         List of ROS messages.
     """
-    if not isinstance(bagfile, rosbag.Bag):
-        bag = rosbag.Bag(bagfile, "r")
-    else:
-        bag = bagfile
-
-    bag_start_time = rospy.Time.from_sec(bag.get_start_time() + start_time)
-
     if duration is None:
-        end_time = rospy.Time.from_sec(bag.get_end_time())
+        stop_time = None 
     else:
-        end_time = rospy.Time.from_sec(
-            bag.get_start_time() + start_time + duration
-        )
-
-    out = [
-        msg for _, msg, _ in bag.read_messages(topic, bag_start_time, end_time)
-    ]
-
-    if not isinstance(bagfile, rosbag.Bag):
-        bag.close()
+        stop_time = start_time + duration
+        
+    with AnyReader([Path(bagfile)]) as reader:
+        connections = [x for x in reader.connections if x.topic == topic]
+        out = []
+        for connection, timestamp, rawdata in reader.messages(connections=connections, start = start_time, stop=stop_time):
+            out.append(reader.deserialize(rawdata, connection.msgtype))
+         
 
     return out
 

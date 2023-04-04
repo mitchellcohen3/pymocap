@@ -1,6 +1,6 @@
 from typing import Dict, List, Tuple, Any
 import numpy as np
-from sensor_msgs.msg import Imu
+# from sensor_msgs.msg import Imu
 from scipy.optimize import least_squares
 from scipy import signal
 from .mocap import MocapTrajectory
@@ -23,7 +23,7 @@ class IMUData:
         self.angular_velocity = angular_velocity
 
     @staticmethod
-    def from_ros(imu_data: List[Imu]):
+    def from_ros(imu_data):
 
         stamps = []
         acceleration = []

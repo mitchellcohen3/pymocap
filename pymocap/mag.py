@@ -6,7 +6,7 @@ from pynav.utils import plot_meas
 from .utils import bag_to_list, bmv, LeastSquares
 from .mocap import MocapTrajectory
 from matplotlib import pyplot as plt
-from sensor_msgs.msg import MagneticField
+# from sensor_msgs.msg import MagneticField
 from scipy.optimize import least_squares
 from pylie import SO3
 import scipy
@@ -24,7 +24,7 @@ class MagnetometerData:
         self.magnetic_field = magnetic_field
 
     @staticmethod
-    def from_ros(imu_data: List[MagneticField]):
+    def from_ros(imu_data):
 
         stamps = []
         magnetic_field = []

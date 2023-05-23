@@ -1,15 +1,16 @@
 from typing import List, Any
 import numpy as np
-#from geometry_msgs.msg import PoseStamped
 from csaps import csaps
 from pylie import SO3, SE3, SE23
 from pynav.lib.states import SE3State, SE23State
 from scipy.interpolate import interp1d
 from .utils import bag_to_list, bquat_to_so3, bso3_to_quat
-#import rosbag
 import matplotlib.pyplot as plt
 from pathlib import Path
 from rosbags.highlevel import AnyReader
+
+import rosbag
+from geometry_msgs.msg import PoseStamped
 
 class MocapTrajectory:
     """
@@ -22,10 +23,11 @@ class MocapTrajectory:
 
     def __init__(
         self,
-        stamps: np.ndarray,
+        stamps: np.ndarray, 
         position_data: np.ndarray,
         quaternion_data: np.ndarray,
         frame_id: Any,
+        quat_stamps: np.ndarray = None,
     ):
         """
         Parameters
@@ -46,8 +48,11 @@ class MocapTrajectory:
         self.raw_quaternion = quaternion_data
         self.frame_id = frame_id
 
+        if quat_stamps is None:
+            quat_stamps = stamps 
+
         self._fit_position_spline(self.stamps, self.raw_position)
-        self._fit_quaternion_spline(self.stamps, self.raw_quaternion)
+        self._fit_quaternion_spline(quat_stamps, self.raw_quaternion)
 
         #:np.ndarray: Boolean array containing a static flag for each data point
         self.static_mask = self.get_static_mask(1, 0.0008)

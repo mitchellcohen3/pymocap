@@ -1,12 +1,23 @@
 from typing import Dict, List, Tuple, Any
 import numpy as np
-# from sensor_msgs.msg import Range
-from pynav.lib.models import Altitude
-from pynav.types import Measurement
 from .mocap import MocapTrajectory
 import matplotlib.pyplot as plt
-from pynav.utils import plot_meas
 from .utils import bag_to_list
+
+try:
+    from pynav import plot_meas, Measurement
+    from pynav.lib import Altitude
+except ImportError:
+    class Measurement:
+        def __init__(self, *args, **kwargs):
+            raise ImportError("pynav not installed")
+        
+    class Altitude:
+        def __init__(self, *args, **kwargs):
+            raise ImportError("pynav not installed")
+    
+    def plot_meas(*args, **kwargs):
+        raise ImportError("pynav not installed")
 
 
 class HeightData:

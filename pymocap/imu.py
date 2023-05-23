@@ -6,10 +6,14 @@ from scipy import signal
 from .mocap import MocapTrajectory
 from pylie import SO3
 from .utils import bmv, bag_to_list, blog_so3, bexp_so3
-from pynav.lib.states import SE23State
-from pynav.lib.imu import IMU, IMUKinematics
 from matplotlib import pyplot as plt
 
+try:
+    from pynav.lib.imu import IMU
+except ImportError:
+    class IMU:
+        def __init__(self, *args, **kwargs):
+            raise ImportError("pynav not installed")
 
 class IMUData:
     def __init__(

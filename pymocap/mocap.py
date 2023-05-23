@@ -1,16 +1,30 @@
 from typing import List, Any
 import numpy as np
 from csaps import csaps
-from pylie import SO3, SE3, SE23
-from pynav.lib.states import SE3State, SE23State
 from scipy.interpolate import interp1d
 from .utils import bag_to_list, bquat_to_so3, bso3_to_quat
 import matplotlib.pyplot as plt
 from pathlib import Path
 from rosbags.highlevel import AnyReader
+from pylie import SO3
 
-import rosbag
-from geometry_msgs.msg import PoseStamped
+try:
+    # pynav will be an optional dependency. If it is not installed, some
+    # functions will not work. but thats okay.
+    from pynav.lib.states import SE3State, SE23State
+
+except ImportError:
+    # If not installed, then create dummy classes so that the user can still
+    # import this module.
+    class SE3State:
+        def __init__(self, *args, **kwargs):
+            raise ImportError("pynav not installed.")
+    
+    class SE23State:
+        def __init__(self, *args, **kwargs):
+            raise ImportError("pynav not installed.")
+     
+
 
 class MocapTrajectory:
     """
@@ -151,7 +165,7 @@ class MocapTrajectory:
                 + " exactly the right one using the `topic` argument."
             )
 
-        data = bag_to_list(bagfile, vrpn_topics)
+        data = bag_to_list(bagfile, vrpn_topics[0])
 
         return MocapTrajectory.from_ros(data, body_id)
 

@@ -8,6 +8,8 @@ setup(
     install_requires = [
         "csaps",
         "numpy",
-        "rosbags"
+        "rosbags",
+        "scipy",
+        "pylie @ git+https://github.com/decargroup/pylie@main",
     ]
 )

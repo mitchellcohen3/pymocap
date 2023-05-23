@@ -93,7 +93,11 @@ def bag_to_list(
         stop_time = start_time + duration
         
     with AnyReader([Path(bagfile)]) as reader:
-        connections = [x for x in reader.connections if x.topic == topic]
+        connections = []
+        for c in reader.connections:
+            if c.topic == topic:
+                connections.append(c)
+                
         out = []
         for connection, timestamp, rawdata in reader.messages(connections=connections, start = start_time, stop=stop_time):
             out.append(reader.deserialize(rawdata, connection.msgtype))

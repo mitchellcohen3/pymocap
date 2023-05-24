@@ -40,7 +40,7 @@ class MocapTrajectory:
         stamps: np.ndarray, 
         position_data: np.ndarray,
         quaternion_data: np.ndarray,
-        frame_id: Any,
+        frame_id: Any = None,
         quat_stamps: np.ndarray = None,
     ):
         """
@@ -51,7 +51,7 @@ class MocapTrajectory:
         position_data : np.ndarray with shape (N, 3)
             Position data where each row is a 3D position
         quaternion_data : np.ndarray with shape (N, 4)
-            Attitude data where each row is a quaternion
+            Attitude data where each row is a quaternion with `wxyz` ordering
         frame_id : Any
             Optional frame ID to assign to this data. Will be used as the state
             ID when converting to ``pynav`` states.
@@ -72,10 +72,24 @@ class MocapTrajectory:
         self.static_mask = self.get_static_mask(1, 0.0008)
 
     def _fit_position_spline(self, stamps, pos):
-        # Fit splines
+
+        # First, filter out positions with zero norm
+        # We assume that this is gaps in the mocap data
+        is_valid = np.linalg.norm(pos, axis=1) > 1e-6
+        stamps = stamps[is_valid]
+        pos = pos[is_valid]
+
+        # Fit spline
         self._pos_spline = csaps(stamps, pos.T, smooth=0.9999)
 
     def _fit_quaternion_spline(self, stamps, quat):
+        # First, filter out invalid quaternions with zero norm
+        # We assume that this is gaps in the mocap data
+        is_valid = np.linalg.norm(quat, axis=1) > 1e-6
+        stamps = stamps[is_valid]
+        quat = quat[is_valid]
+
+
         # Normalize quaternion
         quat /= np.linalg.norm(quat, axis=1)[:, None]
 
@@ -183,18 +197,27 @@ class MocapTrajectory:
         # Plot position
         pos = self.position(self.stamps)
         pos_axs[0].plot(self.stamps, pos[:, 0])
+        pos_axs[0].set_ylabel("$x$")
         pos_axs[1].plot(self.stamps, pos[:, 1])
+        pos_axs[1].set_ylabel("$y$")
         pos_axs[2].plot(self.stamps, pos[:, 2])
+        pos_axs[2].set_ylabel("$z$")
         pos_axs[2].plot(self.stamps, self.static_mask.astype(int), label="Static")
         pos_axs[0].set_title("Mocap Position Trajectory")
         pos_axs[2].legend()
+        pos_axs[2].set_xlabel("Time (s)")
 
         # Plot quaternion
         quat = self.quaternion(self.stamps)
         quat_axs[0].plot(self.stamps, quat[:, 0])
+        quat_axs[0].set_ylabel("$q_w$")
         quat_axs[1].plot(self.stamps, quat[:, 1])
+        quat_axs[1].set_ylabel("$q_x$")
         quat_axs[2].plot(self.stamps, quat[:, 2])
+        quat_axs[2].set_ylabel("$q_y$")
         quat_axs[3].plot(self.stamps, quat[:, 3])
+        quat_axs[3].set_ylabel("$q_z$")
+        quat_axs[3].set_xlabel("Time (s)")
         quat_axs[0].set_title("Mocap Quaternion Trajectory")
         quat_axs[0].set_ylim(-1.05, 1.05)
         return fig, axs

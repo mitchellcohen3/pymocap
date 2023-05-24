@@ -3,14 +3,17 @@ Collection of tools for working with mocap data
 
 ## Dependencies
 
-- ``pynav``
-- ``pylie``
+- ``pynav`` (optional, for conversions into pynav types)
+- ``pylie`` (installed automatically by `pip`)
 
 ## Installation
 
 `cd` into the folder and as usual:
 
     pip install -e .
+
+## Getting started
+Check out the examples in the `./examples/` folder.
 
 ## Idea for improvement
 This appears to work, it is essentially the same as `decar_mocap_tools`. However,

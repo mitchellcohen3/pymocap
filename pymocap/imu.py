@@ -1,15 +1,19 @@
 from typing import Dict, List, Tuple, Any
 import numpy as np
-from sensor_msgs.msg import Imu
+# from sensor_msgs.msg import Imu
 from scipy.optimize import least_squares
 from scipy import signal
 from .mocap import MocapTrajectory
 from pylie import SO3
 from .utils import bmv, bag_to_list, blog_so3, bexp_so3
-from pynav.lib.states import SE23State
-from pynav.lib.imu import IMU, IMUKinematics
 from matplotlib import pyplot as plt
 
+try:
+    from pynav.lib.imu import IMU
+except ImportError:
+    class IMU:
+        def __init__(self, *args, **kwargs):
+            raise ImportError("pynav not installed")
 
 class IMUData:
     def __init__(
@@ -23,7 +27,7 @@ class IMUData:
         self.angular_velocity = angular_velocity
 
     @staticmethod
-    def from_ros(imu_data: List[Imu]):
+    def from_ros(imu_data):
 
         stamps = []
         acceleration = []

@@ -5,4 +5,11 @@ setup(
     version="0.0.1",
     description="Various tools for working with mocap data",
     packages=find_packages(),
+    install_requires = [
+        "csaps",
+        "numpy",
+        "rosbags",
+        "scipy",
+        "pylie @ git+https://github.com/decargroup/pylie@main",
+    ]
 )

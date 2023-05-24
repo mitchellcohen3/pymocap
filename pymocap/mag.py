@@ -1,18 +1,26 @@
-from typing import Dict, List, Tuple, Any
+from typing import  List
 import numpy as np
-from pynav.lib.models import Magnetometer
-from pynav.types import Measurement
-from pynav.utils import plot_meas
 from .utils import bag_to_list, bmv, LeastSquares
 from .mocap import MocapTrajectory
 from matplotlib import pyplot as plt
-from sensor_msgs.msg import MagneticField
-from scipy.optimize import least_squares
 from pylie import SO3
-import scipy
-from scipy.linalg import block_diag
+from scipy.optimize import least_squares
 from scipy.linalg import sqrtm
 
+try:
+    from pynav import Measurement, plot_meas
+    from pynav.lib.models import Magnetometer
+except ImportError:
+    class Measurement:
+        def __init__(self, *args, **kwargs):
+            raise ImportError("pynav not installed")
+        
+    class Magnetometer:
+        def __init__(self, *args, **kwargs):
+            raise ImportError("pynav not installed")
+        
+    def plot_meas(*args, **kwargs):
+        raise ImportError("pynav not installed")
 
 class MagnetometerData:
     def __init__(
@@ -24,7 +32,7 @@ class MagnetometerData:
         self.magnetic_field = magnetic_field
 
     @staticmethod
-    def from_ros(imu_data: List[MagneticField]):
+    def from_ros(imu_data):
 
         stamps = []
         magnetic_field = []

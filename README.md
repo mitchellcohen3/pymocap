@@ -3,14 +3,17 @@ Collection of tools for working with mocap data
 
 ## Dependencies
 
-- ``navlie``
-- ``pymlg``
+- ``navlie`` (optional)
+- ``pymlg`` (installed by pip)
 
 ## Installation
 
 `cd` into the folder and as usual:
 
     pip install -e .
+
+## Getting started
+Check out the examples in the `./examples/` folder.
 
 ## Idea for improvement
 This appears to work, it is essentially the same as `decar_mocap_tools`. However,

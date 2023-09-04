@@ -4,16 +4,16 @@ import numpy as np
 from scipy.optimize import least_squares
 from scipy import signal
 from .mocap import MocapTrajectory
-from pylie import SO3
+from pymlg import SO3
 from .utils import bmv, bag_to_list, blog_so3, bexp_so3
 from matplotlib import pyplot as plt
 
 try:
-    from pynav.lib.imu import IMU
+    from navlie.lib.imu import IMU
 except ImportError:
     class IMU:
         def __init__(self, *args, **kwargs):
-            raise ImportError("pynav not installed")
+            raise ImportError("navlie not installed")
 
 class IMUData:
     def __init__(
@@ -60,7 +60,7 @@ class IMUData:
         imu_data = bag_to_list(bag, topic)
         return IMUData.from_ros(imu_data)
 
-    def to_pynav(self, state_id=None) -> List[IMU]:
+    def to_navlie(self, state_id=None) -> List[IMU]:
         acc = self.acceleration.copy()
         gyro = self.angular_velocity.copy()
 

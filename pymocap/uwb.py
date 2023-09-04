@@ -7,16 +7,16 @@ from .utils import bag_to_list, bmv
 from .mocap import MocapTrajectory
 
 try: 
-    from pynav.lib.models import RangePoseToPose
-    from pynav.types import Measurement
+    from navlie.lib.models import RangePoseToPose
+    from navlie.types import Measurement
 except ImportError:
     class RangePoseToPose:
         def __init__(self, *args, **kwargs):
-            raise ImportError("pynav not installed")
+            raise ImportError("navlie not installed")
         
     class Measurement:
         def __init__(self, *args, **kwargs):
-            raise ImportError("pynav not installed")
+            raise ImportError("navlie not installed")
 
 
 SPEED_OF_LIGHT = 299702547  # speed of light in m/s
@@ -217,9 +217,9 @@ class RangeData:
         )
         return self[match_mask]
 
-    def to_pynav(self, tags: List[Tag], variance: float = None, state_id: Any = None) -> List[Measurement]:
+    def to_navlie(self, tags: List[Tag], variance: float = None, state_id: Any = None) -> List[Measurement]:
         """
-        Convert to a list of `pynav` measurements.
+        Convert to a list of `navlie` measurements.
 
         Parameters
         ----------
@@ -234,7 +234,7 @@ class RangeData:
         Returns
         -------
         List[Measurement]
-            List of `pynav` measurements.
+            List of `navlie` measurements.
         """
 
         tag_dict = {t.id: t for t in tags}

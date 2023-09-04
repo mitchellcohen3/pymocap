@@ -6,23 +6,23 @@ from .utils import bag_to_list, bquat_to_so3, bso3_to_quat
 import matplotlib.pyplot as plt
 from pathlib import Path
 from rosbags.highlevel import AnyReader
-from pylie import SO3
+from pymlg import SO3
 
 try:
-    # pynav will be an optional dependency. If it is not installed, some
+    # navlie will be an optional dependency. If it is not installed, some
     # functions will not work. but thats okay.
-    from pynav.lib.states import SE3State, SE23State
+    from navlie.lib.states import SE3State, SE23State
 
 except ImportError:
     # If not installed, then create dummy classes so that the user can still
     # import this module.
     class SE3State:
         def __init__(self, *args, **kwargs):
-            raise ImportError("pynav not installed.")
+            raise ImportError("navlie not installed.")
     
     class SE23State:
         def __init__(self, *args, **kwargs):
-            raise ImportError("pynav not installed.")
+            raise ImportError("navlie not installed.")
      
 
 
@@ -54,7 +54,7 @@ class MocapTrajectory:
             Attitude data where each row is a quaternion with `wxyz` ordering
         frame_id : Any
             Optional frame ID to assign to this data. Will be used as the state
-            ID when converting to ``pynav`` states.
+            ID when converting to ``navlie`` states.
         """
 
         self.stamps = stamps
@@ -377,11 +377,11 @@ class MocapTrajectory:
         T[:, 4, 4] = 1
         return T
 
-    def to_pynav(
+    def to_navlie(
         self, stamps: np.ndarray, extended_pose: bool = False
     ) -> List[SE23State]:
         """
-        Creates pynav ``SE3State`` or ``SE23State`` objects from the trajectory.
+        Creates navlie ``SE3State`` or ``SE23State`` objects from the trajectory.
 
         Parameters
         ----------
@@ -394,7 +394,7 @@ class MocapTrajectory:
         Returns
         -------
         List[SE23State]
-            ``pynav`` state objects at the query times
+            ``navlie`` state objects at the query times
         """
         if extended_pose:
             T = self.extended_pose_matrix(stamps)

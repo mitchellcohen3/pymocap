@@ -6,7 +6,7 @@ import seaborn as sns
 sns.set_theme(style="whitegrid")
 
 # TODO: add the correction
-# TODO: test the pynav export
+# TODO: test the navlie export
 
 
 tags = [

@@ -10,6 +10,6 @@ setup(
         "numpy",
         "rosbags",
         "scipy",
-        "pylie @ git+https://github.com/decargroup/pylie@main",
+        "pymlg @ git+https://github.com/decargroup/pymlg@main",
     ]
 )

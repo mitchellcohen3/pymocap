@@ -5,19 +5,19 @@ import matplotlib.pyplot as plt
 from .utils import bag_to_list
 
 try:
-    from pynav import plot_meas, Measurement
-    from pynav.lib import Altitude
+    from navlie import plot_meas, Measurement
+    from navlie.lib import Altitude
 except ImportError:
     class Measurement:
         def __init__(self, *args, **kwargs):
-            raise ImportError("pynav not installed")
+            raise ImportError("navlie not installed")
         
     class Altitude:
         def __init__(self, *args, **kwargs):
-            raise ImportError("pynav not installed")
+            raise ImportError("navlie not installed")
     
     def plot_meas(*args, **kwargs):
-        raise ImportError("pynav not installed")
+        raise ImportError("navlie not installed")
 
 
 class HeightData:
@@ -60,11 +60,11 @@ class HeightData:
         height_msgs = bag_to_list(bag, topic)
         return HeightData.from_ros(height_msgs)
 
-    def to_pynav(
+    def to_navlie(
         self, state_id=None, variance=0.1**2, minimum=0.4, bias=0.0
     ) -> List[Measurement]:
         """
-        Converts the distance data to a list of pynav Measurement objects.
+        Converts the distance data to a list of navlie Measurement objects.
 
         Parameters
         ----------
@@ -80,7 +80,7 @@ class HeightData:
         Returns
         -------
         List[Measurement]
-            pynav Measurement objects with an Altitude model
+            navlie Measurement objects with an Altitude model
         """
         data = []
         model = Altitude(variance, minimum=minimum, bias=bias)
@@ -120,9 +120,9 @@ class HeightData:
         """
 
         if mocap is not None:
-            height_meas = self.to_pynav(variance=variance, minimum=minimum, bias=bias)
+            height_meas = self.to_navlie(variance=variance, minimum=minimum, bias=bias)
             height_stamps = [meas.stamp for meas in height_meas]
-            x_true = mocap.to_pynav(height_stamps)
+            x_true = mocap.to_navlie(height_stamps)
             fig, axs = plot_meas(height_meas, x_true, axs=axs)
 
         else:

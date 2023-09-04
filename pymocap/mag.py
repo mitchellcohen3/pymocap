@@ -3,24 +3,24 @@ import numpy as np
 from .utils import bag_to_list, bmv, LeastSquares
 from .mocap import MocapTrajectory
 from matplotlib import pyplot as plt
-from pylie import SO3
+from pymlg import SO3
 from scipy.optimize import least_squares
 from scipy.linalg import sqrtm
 
 try:
-    from pynav import Measurement, plot_meas
-    from pynav.lib.models import Magnetometer
+    from navlie import Measurement, plot_meas
+    from navlie.lib.models import Magnetometer
 except ImportError:
     class Measurement:
         def __init__(self, *args, **kwargs):
-            raise ImportError("pynav not installed")
+            raise ImportError("navlie not installed")
         
     class Magnetometer:
         def __init__(self, *args, **kwargs):
-            raise ImportError("pynav not installed")
+            raise ImportError("navlie not installed")
         
     def plot_meas(*args, **kwargs):
-        raise ImportError("pynav not installed")
+        raise ImportError("navlie not installed")
 
 class MagnetometerData:
     def __init__(
@@ -55,7 +55,7 @@ class MagnetometerData:
         mag_data = bag_to_list(bag, topic)
         return MagnetometerData.from_ros(mag_data)
 
-    def to_pynav(
+    def to_navlie(
         self,
         mag_vector: List[float],
         state_id=None,
@@ -76,8 +76,8 @@ class MagnetometerData:
     ):
 
         if not world_frame and mag_vector is not None:
-            meas = self.to_pynav(mag_vector)
-            T = mocap.to_pynav(self.stamps)
+            meas = self.to_navlie(mag_vector)
+            T = mocap.to_navlie(self.stamps)
             fig, axs = plot_meas(meas, T, sharey=True)
 
         else:

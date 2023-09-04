@@ -3,8 +3,8 @@ Collection of tools for working with mocap data
 
 ## Dependencies
 
-- ``pynav``
-- ``pylie``
+- ``navlie``
+- ``pymlg``
 
 ## Installation
 

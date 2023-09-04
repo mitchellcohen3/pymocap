@@ -26,8 +26,8 @@ fig[1].suptitle("Calibrated Accel Data")
 
 ################################################################################
 # We will test with some dead reckoning.
-from pynav.lib.states import SE23State
-from pynav.lib.imu import IMU, IMUKinematics
+from navlie.lib.states import SE23State
+from navlie.lib.imu import IMU, IMUKinematics
 from typing import List
 import numpy as np
 from tqdm import tqdm
@@ -36,9 +36,9 @@ from pymocap.utils import blog_so3
 np.set_printoptions(precision=3, suppress=True)
 start_idx = 500  # sometimes weird stuff at the beginning
 process = IMUKinematics(None)
-imu_list: List[IMU] = imu.to_pynav()
+imu_list: List[IMU] = imu.to_navlie()
 imu_list = imu_list[start_idx:]
-traj_true: List[SE23State] = mocap.to_pynav(imu.stamps[start_idx:], extended_pose=True)
+traj_true: List[SE23State] = mocap.to_navlie(imu.stamps[start_idx:], extended_pose=True)
 x = traj_true[0]
 x.velocity = 0
 

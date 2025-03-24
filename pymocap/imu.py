@@ -34,7 +34,7 @@ class IMUData:
         angular_velocity = []
 
         for p in imu_data:
-            stamps.append(p.header.stamp.to_sec())
+            stamps.append(p.header.stamp.sec + 1e-9*p.header.stamp.nanosec)
             acceleration.append(
                 [
                     p.linear_acceleration.x,
@@ -70,6 +70,52 @@ class IMUData:
             data.append(u)
         return data
 
+    def plot_angular_velocity(self, mocap: MocapTrajectory = None, ax: plt.Axes = None):
+        if ax is None:
+            fig, ax = plt.subplots(3, 1, sharex=True)
+        
+        # Plot true angular velocities
+        gyro = self.angular_velocity
+        ax[0].plot(self.stamps, gyro[:, 0], label="IMU")
+        ax[1].plot(self.stamps, gyro[:, 1])
+        ax[2].plot(self.stamps, gyro[:, 2])
+
+        if mocap is not None:
+            gyro_mocap = mocap.angular_velocity(self.stamps)
+            ax[0].plot(self.stamps, gyro_mocap[:, 0], label="Mocap")
+            ax[1].plot(self.stamps, gyro_mocap[:, 1])
+            ax[2].plot(self.stamps, gyro_mocap[:, 2])
+        
+        ax[0].legend()
+        ax[0].set_ylabel("X (rad/s)")
+        ax[1].set_ylabel("Y (rad/s)")
+        ax[2].set_ylabel("Z (rad/s)")
+        return fig, ax
+    
+    def plot_acceleration(self, mocap: MocapTrajectory = None, ax: plt.Axes = None):
+        if ax is None:
+            fig, ax = plt.subplots(3, 1, sharex=True)
+        
+        # Plot accelerometer
+        accel = self.acceleration
+        ax[0].plot(self.stamps, accel[:, 0], label="IMU")
+        ax[1].plot(self.stamps, accel[:, 1])
+        ax[2].plot(self.stamps, accel[:, 2])
+
+        if mocap is not None:
+            accel_mocap = mocap.accelerometer(self.stamps)
+            ax[0].plot(self.stamps, accel_mocap[:, 0], label="Mocap")
+            ax[1].plot(self.stamps, accel_mocap[:, 1])
+            ax[2].plot(self.stamps, accel_mocap[:, 2])
+
+        ax[0].legend()
+        ax[-1].set_xlabel("Time (s)")
+        ax[0].set_ylabel(r"X (m/s$^2$)")
+        ax[1].set_ylabel(r"Y (m/$s^2$)")
+        ax[2].set_ylabel(r"Z (m/$s^2$)")
+        ax[0].set_title("Accelerometer")
+        return fig, ax
+
     def plot(
         self, mocap: MocapTrajectory = None, axs: List[plt.Axes] = None
     ) -> Tuple[List[plt.Figure], List[plt.Axes]]:
@@ -85,13 +131,14 @@ class IMUData:
             gyro_axs = axs[:3]
             accel_axs = axs[3:]
 
-        gyro_mocap = mocap.angular_velocity(self.stamps)
+        # Plot true angular velocities
         gyro = self.angular_velocity
         gyro_axs[0].plot(self.stamps, gyro[:, 0], label="IMU")
         gyro_axs[1].plot(self.stamps, gyro[:, 1])
         gyro_axs[2].plot(self.stamps, gyro[:, 2])
 
         if mocap is not None:
+            gyro_mocap = mocap.angular_velocity(self.stamps)
             gyro_axs[0].plot(self.stamps, gyro_mocap[:, 0], label="Mocap")
             gyro_axs[1].plot(self.stamps, gyro_mocap[:, 1])
             gyro_axs[2].plot(self.stamps, gyro_mocap[:, 2])
@@ -104,13 +151,13 @@ class IMUData:
         gyro_axs[0].set_title("Rate gyro")
 
         # Plot accelerometer
-        accel_mocap = mocap.accelerometer(self.stamps)
         accel = self.acceleration
         accel_axs[0].plot(self.stamps, accel[:, 0], label="IMU")
         accel_axs[1].plot(self.stamps, accel[:, 1])
         accel_axs[2].plot(self.stamps, accel[:, 2])
 
         if mocap is not None:
+            accel_mocap = mocap.accelerometer(self.stamps)
             accel_axs[0].plot(self.stamps, accel_mocap[:, 0], label="Mocap")
             accel_axs[1].plot(self.stamps, accel_mocap[:, 1])
             accel_axs[2].plot(self.stamps, accel_mocap[:, 2])
